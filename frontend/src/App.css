@@ -1,0 +1,148 @@
+.app {
+  min-height: 100vh;
+  min-height: -webkit-fill-available; /* iOS Safari fix */
+  padding-bottom: 70px; /* Space for bottom navigation */
+  padding-bottom: calc(70px + env(safe-area-inset-bottom)); /* Account for safe area */
+  background-color: #f5f5f5;
+}
+
+/* Mobile viewport fix */
+@media (max-width: 768px) {
+  .app {
+    padding-bottom: 80px;
+  }
+}
+
+/* App Layout */
+.app-layout {
+  min-height: 100vh;
+  min-height: -webkit-fill-available; /* iOS Safari fix */
+  display: flex;
+  flex-direction: column;
+  background-color: #f5f5f5;
+}
+
+.app-main {
+  padding-top: calc(56px + env(safe-area-inset-top));
+  padding-bottom: calc(70px + env(safe-area-inset-bottom));
+  flex: 1;
+}
+
+
+/* Header Styles */
+.app-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  margin: -20;
+
+  height: calc(56px + env(safe-area-inset-top));
+  padding-top: -10;
+
+  background: #081552;
+  color: white;
+
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+}
+
+
+.header-content {
+  height: 55px;
+  width: 100%;
+  margin: -20;
+  padding: 0 16px;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+}
+
+.shop-info {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  pointer-events: none;
+}
+
+.shop-name {
+  margin: -20 !important;
+  font-size: 2rem !important;
+  font-weight: 500 !important;
+  color: white !important;
+  letter-spacing: -0.01em;
+  line-height: 0,5;
+  padding-bottom: 20px;
+
+}
+
+.header-spacer {
+  width: 40px; /* Same width as profile button to balance layout */
+}
+
+.profile-button {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  padding: 6px;
+  margin-bottom: 20px;
+  margin-left: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  width: 33px;
+  height: 33px;
+}
+
+.profile-button:hover {
+  background: rgba(255, 255, 255, 0.25);
+  transform: translateY(-1px);
+}
+
+.profile-button:active {
+  transform: translateY(0);
+}
+
+.profile-button svg {
+  width: 30px;
+  height: 30px;
+}
+
+@media (max-width: 768px) {
+  .app-main {
+    padding-bottom: 80px;
+  }
+  
+  .header-content {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 5px;
+  }
+  
+  .header-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  
+  .shop-name {
+    font-size: 1.5rem !important;
+  }
+}
+
+
+
+
+
+

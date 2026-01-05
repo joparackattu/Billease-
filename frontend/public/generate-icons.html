@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>BILLESE Icon Generator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .icon-preview {
+            width: 200px;
+            height: 200px;
+            background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%);
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 48px;
+            font-weight: bold;
+            margin: 20px auto;
+        }
+        canvas {
+            display: none;
+        }
+        button {
+            background: #7c3aed;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background: #6d28d9;
+        }
+    </style>
+</head>
+<body>
+    <h1>BILLESE App Icon Generator</h1>
+    <p>This tool generates the required PWA icons for your app.</p>
+    
+    <div class="icon-preview" id="preview">B</div>
+    
+    <canvas id="canvas" width="512" height="512"></canvas>
+    
+    <div>
+        <button onclick="generateIcons()">Generate All Icons</button>
+        <button onclick="downloadIcon(192)">Download 192x192</button>
+        <button onclick="downloadIcon(512)">Download 512x512</button>
+        <button onclick="downloadAppleIcon()">Download Apple Touch Icon</button>
+    </div>
+    
+    <script>
+        function generateIcons() {
+            downloadIcon(192);
+            downloadIcon(512);
+            downloadAppleIcon();
+            alert('All icons generated! Check your downloads folder.');
+        }
+        
+        function downloadIcon(size) {
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Set canvas size
+            canvas.width = size;
+            canvas.height = size;
+            
+            // Draw gradient background
+            const gradient = ctx.createLinearGradient(0, 0, size, size);
+            gradient.addColorStop(0, '#7c3aed');
+            gradient.addColorStop(1, '#a855f7');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, size, size);
+            
+            // Draw rounded corners
+            ctx.globalCompositeOperation = 'destination-in';
+            ctx.beginPath();
+            const radius = size * 0.15;
+            ctx.roundRect(0, 0, size, size, radius);
+            ctx.fill();
+            ctx.globalCompositeOperation = 'source-over';
+            
+            // Draw letter B
+            ctx.fillStyle = 'white';
+            ctx.font = `bold ${size * 0.5}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('B', size / 2, size / 2);
+            
+            // Download
+            canvas.toBlob((blob) => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `pwa-${size}x${size}.png`;
+                a.click();
+                URL.revokeObjectURL(url);
+            });
+        }
+        
+        function downloadAppleIcon() {
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Apple touch icon is 180x180
+            canvas.width = 180;
+            canvas.height = 180;
+            
+            // Draw gradient background
+            const gradient = ctx.createLinearGradient(0, 0, 180, 180);
+            gradient.addColorStop(0, '#7c3aed');
+            gradient.addColorStop(1, '#a855f7');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 180, 180);
+            
+            // Draw rounded corners (iOS uses 20% corner radius)
+            ctx.globalCompositeOperation = 'destination-in';
+            ctx.beginPath();
+            const radius = 180 * 0.2;
+            ctx.roundRect(0, 0, 180, 180, radius);
+            ctx.fill();
+            ctx.globalCompositeOperation = 'source-over';
+            
+            // Draw letter B
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 90px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('B', 90, 90);
+            
+            // Download
+            canvas.toBlob((blob) => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'apple-touch-icon.png';
+                a.click();
+                URL.revokeObjectURL(url);
+            });
+        }
+        
+        // Polyfill for roundRect if not available
+        if (!CanvasRenderingContext2D.prototype.roundRect) {
+            CanvasRenderingContext2D.prototype.roundRect = function(x, y, width, height, radius) {
+                this.beginPath();
+                this.moveTo(x + radius, y);
+                this.lineTo(x + width - radius, y);
+                this.quadraticCurveTo(x + width, y, x + width, y + radius);
+                this.lineTo(x + width, y + height - radius);
+                this.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+                this.lineTo(x + radius, y + height);
+                this.quadraticCurveTo(x, y + height, x, y + height - radius);
+                this.lineTo(x, y + radius);
+                this.quadraticCurveTo(x, y, x + radius, y);
+                this.closePath();
+            };
+        }
+    </script>
+</body>
+</html>
+

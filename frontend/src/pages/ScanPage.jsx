@@ -1,0 +1,184 @@
+import React, { useState, useEffect, useRef } from 'react'
+import { getCameraFrame, resetDetectionState } from '../api/backend'
+import scanningService from '../services/scanningService'
+import { CameraIcon, PlayIcon, StopIcon, CheckIcon, AlertCircleIcon } from '../components/Icons'
+import './ScanPage.css'
+
+function ScanPage() {
+  const [cameraUrl, setCameraUrl] = useState('')
+  const [isScanning, setIsScanning] = useState(false)
+  const [detectedItems, setDetectedItems] = useState([])
+  const [error, setError] = useState('')
+  const cameraRefreshInterval = useRef(null)
+
+  // Initialize scanning state from service (persists across navigation)
+  useEffect(() => {
+    const currentState = scanningService.isScanningActive()
+    setIsScanning(currentState)
+
+    const handleStateChange = (isActive) => {
+      setIsScanning(isActive)
+    }
+    scanningService.addListener(handleStateChange)
+
+    const handleItemDetected = (event) => {
+      const detectedItem = event.detail
+      
+      setDetectedItems(prev => {
+        const isDuplicate = prev.some(
+          item => item.name === detectedItem.name
+        )
+
+        if (!isDuplicate) {
+          const newItems = [...prev, detectedItem]
+          
+          setTimeout(() => {
+            setDetectedItems(current => current.filter(i => 
+              !(i.name === detectedItem.name && 
+                Math.abs(i.weight_grams - detectedItem.weight_grams) < 5)
+            ))
+          }, 3000)
+          
+          return newItems
+        } else {
+          console.log(`Skipping duplicate detection: ${detectedItem.name}`)
+          return prev
+        }
+      })
+    }
+    window.addEventListener('itemDetected', handleItemDetected)
+
+    return () => {
+      scanningService.removeListener(handleStateChange)
+      window.removeEventListener('itemDetected', handleItemDetected)
+    }
+  }, [])
+
+  // Refresh camera feed
+  useEffect(() => {
+    const refreshCamera = () => {
+      setCameraUrl(getCameraFrame())
+    }
+    
+    refreshCamera()
+    cameraRefreshInterval.current = setInterval(refreshCamera, 120)
+    
+    return () => {
+      if (cameraRefreshInterval.current) {
+        clearInterval(cameraRefreshInterval.current)
+      }
+    }
+  }, [])
+
+  const handleToggleScan = async () => {
+    if (!isScanning) {
+      setDetectedItems([])
+      setError('')
+      try {
+        await resetDetectionState()
+      } catch (err) {
+        console.error('Failed to reset detection state:', err)
+      }
+      scanningService.startScanning()
+    } else {
+      try {
+        await resetDetectionState()
+      } catch (err) {
+        console.error('Failed to reset detection state:', err)
+      }
+      scanningService.stopScanning()
+    }
+  }
+
+  return (
+    <div className="scan-page">
+      <div className="page-header">
+        <CameraIcon size={28} className="page-header-icon" />
+        <h1>Scan Item</h1>
+      </div>
+
+      <div className="camera-container">
+        <div className="camera-feed">
+          {cameraUrl ? (
+            <img 
+              src={cameraUrl} 
+              alt="Camera Feed" 
+              className="camera-image"
+              onError={(e) => {
+                console.error('Camera feed error')
+                e.target.style.display = 'none'
+              }}
+            />
+          ) : (
+            <div className="camera-placeholder">
+              <CameraIcon size={48} className="placeholder-icon" />
+              <p>Loading camera...</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <button
+        onClick={handleToggleScan}
+        className={`scan-button ${isScanning ? 'scanning' : ''}`}
+      >
+        {isScanning ? (
+          <>
+            <StopIcon size={20} />
+            <span>Stop Scanning</span>
+          </>
+        ) : (
+          <>
+            <PlayIcon size={20} />
+            <span>Start Scanning</span>
+          </>
+        )}
+      </button>
+
+      {isScanning && (
+        <div className="scanning-status">
+          <div className="scanning-indicator">
+            <span className="pulse-dot"></span>
+            <span>Scanning active - Place items on platform</span>
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div className="error-message">
+          <AlertCircleIcon size={20} />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {detectedItems.length > 0 && (
+        <div className="detected-items-section">
+          <div className="section-header">
+            <CheckIcon size={24} className="success-icon" />
+            <h3>Item Added to Bill</h3>
+          </div>
+          {detectedItems.map((item, index) => (
+            <div key={index} className="detected-item-card">
+              <div className="item-details">
+                <div className="item-row">
+                  <span className="label">Item</span>
+                  <span className="value">{item.name}</span>
+                </div>
+                <div className="item-row">
+                  <span className="label">Weight</span>
+                  <span className="value">{item.weight_grams}g</span>
+                </div>
+                <div className="item-row">
+                  <span className="label">Price</span>
+                  <span className="value price">₹{item.total_price}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default ScanPage

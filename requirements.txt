@@ -1,0 +1,31 @@
+# BILLESE Backend Dependencies
+# Install with: pip install -r requirements.txt
+
+# FastAPI - Modern, fast web framework for building APIs
+fastapi==0.104.1
+
+# Uvicorn - ASGI server to run FastAPI
+uvicorn[standard]==0.24.0
+
+# Pydantic - Data validation using Python type annotations
+pydantic==2.5.0
+
+# Python-multipart - Required for file uploads (if needed later)
+python-multipart==0.0.6
+
+# Requests - For testing the API and downloading datasets
+requests==2.31.0
+
+# OpenCV - For RTSP camera stream capture
+opencv-python==4.8.1.78
+numpy==1.24.3
+
+# Machine Learning - YOLOv8 for object detection
+ultralytics==8.1.0
+# PyTorch with CUDA support for RTX 2050 (CUDA 11.8)
+# Install manually: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+torch>=2.0.0
+torchvision>=0.15.0
+Pillow>=9.0.0
+PyYAML>=6.0
+

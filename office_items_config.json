@@ -1,0 +1,14 @@
+{
+  "phone": 5000.0,
+  "mouse": 500.0,
+  "keyboard": 1500.0,
+  "laptop": 50000.0,
+  "tablet": 20000.0,
+  "pen": 10.0,
+  "pencil": 5.0,
+  "book": 200.0,
+  "notebook": 50.0,
+  "monitor": 10000.0,
+  "eraser": 5.0,
+  "ruler": 20.0
+}

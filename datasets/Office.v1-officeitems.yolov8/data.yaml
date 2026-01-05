@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 19
+names: ['Book', 'Calculator', 'Chair', 'Computer-keyboard', 'Computer-monitor', 'Computer-mouse', 'Desk', 'Envelope', 'Filing-cabinet', 'Laptop', 'Luggage-and-bags', 'Mug', 'Pen', 'Printer', 'Scissors', 'Shelf', 'Stapler', 'Wall-clock', 'Whiteboard']
+
+roboflow:
+  workspace: billease
+  project: office-yospe-jqo8c
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/billease/office-yospe-jqo8c/dataset/1
