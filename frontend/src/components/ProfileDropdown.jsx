@@ -72,6 +72,22 @@ const UsersIcon = () => (
   </svg>
 )
 
+const LogisticsIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+    <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+    <line x1="12" y1="22.08" x2="12" y2="12"></line>
+  </svg>
+)
+
+const TaxIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <circle cx="8.5" cy="8.5" r="2.5"></circle>
+    <circle cx="15.5" cy="15.5" r="2.5"></circle>
+    <line x1="19" y1="5" x2="5" y2="19"></line>
+  </svg>
+)
+
 function ProfileDropdown({ shopkeeper, onClose }) {
   const navigate = useNavigate()
   const dropdownRef = useRef(null)
@@ -91,8 +107,14 @@ function ProfileDropdown({ shopkeeper, onClose }) {
   }, [shopkeeper])
 
   useEffect(() => {
-    // Always refresh shopkeeper data to ensure we have billease_id
+    // Only refresh shopkeeper data if billease_id is missing
+    // This prevents unnecessary API calls and infinite loops
     const refreshShopkeeperData = async () => {
+      // Only fetch if billease_id is missing (check prop, not local state)
+      if (shopkeeper?.billease_id) {
+        return // Already have billease_id, no need to fetch
+      }
+      
       try {
         console.log('Refreshing shopkeeper data to get billease_id...')
         const result = await getProfile()
@@ -102,7 +124,8 @@ function ProfileDropdown({ shopkeeper, onClose }) {
           // Update localStorage with fresh data
           localStorage.setItem('shopkeeper', JSON.stringify(result.shopkeeper))
           setLocalShopkeeper(result.shopkeeper)
-          window.dispatchEvent(new Event('auth-change'))
+          // Don't dispatch auth-change here - it causes infinite loops
+          // The App.jsx will pick up the localStorage change via storage event if needed
         }
       } catch (error) {
         console.error('Error refreshing shopkeeper data:', error)
@@ -110,7 +133,7 @@ function ProfileDropdown({ shopkeeper, onClose }) {
       }
     }
     
-    // Refresh when component mounts
+    // Refresh when component mounts (only if needed)
     refreshShopkeeperData()
 
     const handleClickOutside = (event) => {
@@ -131,7 +154,9 @@ function ProfileDropdown({ shopkeeper, onClose }) {
       document.removeEventListener('mousedown', handleClickOutside)
       document.removeEventListener('keydown', handleEscape)
     }
-    }, [onClose])
+    // Remove onClose from dependencies - it's stable and doesn't need to trigger re-runs
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
 
   const handleEdit = () => {
     setCurrentView('edit')
@@ -156,9 +181,37 @@ function ProfileDropdown({ shopkeeper, onClose }) {
     setError('')
   }
 
+  // Validation functions
+  const validateEmail = (email) => {
+    if (!email || email.trim() === '') return true // Optional field
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    return emailRegex.test(email)
+  }
+
+  const validatePhone = (phone) => {
+    if (!phone || phone.trim() === '') return true // Optional field
+    // Remove spaces, dashes, parentheses, and plus signs for validation
+    const cleaned = phone.replace(/[\s\-\(\)\+]/g, '')
+    // Indian phone: 10 digits, optionally with country code 91
+    const phoneRegex = /^(91)?[6-9]\d{9}$/
+    return phoneRegex.test(cleaned) && cleaned.length >= 10 && cleaned.length <= 12
+  }
+
   const handleSave = async () => {
     if (!formData.shop_name.trim()) {
       setError('Shop name is required')
+      return
+    }
+
+    // Validate email if provided
+    if (formData.email && !validateEmail(formData.email)) {
+      setError('Please enter a valid email address')
+      return
+    }
+
+    // Validate phone if provided
+    if (formData.phone && !validatePhone(formData.phone)) {
+      setError('Please enter a valid phone number (10 digits, Indian format)')
       return
     }
 
@@ -188,13 +241,23 @@ function ProfileDropdown({ shopkeeper, onClose }) {
   }
 
   const handleAccounts = () => {
-    // Placeholder - will be designed later
-    alert('Accounts page coming soon!')
+    navigate('/accounts')
+    onClose()
+  }
+
+  const handleGST = () => {
+    navigate('/gst')
+    onClose()
   }
 
   const handleAnalytics = () => {
-    // Placeholder - will be designed later
-    alert('Analytics page coming soon!')
+    navigate('/analytics')
+    onClose()
+  }
+
+  const handleLogistics = () => {
+    navigate('/logistics')
+    onClose()
   }
 
   const handleLogout = () => {
@@ -239,6 +302,14 @@ function ProfileDropdown({ shopkeeper, onClose }) {
               <button className="menu-item" onClick={handleAccounts}>
                 <UsersIcon />
                 <span>Accounts</span>
+              </button>
+              <button className="menu-item" onClick={handleLogistics}>
+                <LogisticsIcon />
+                <span>Logistics</span>
+              </button>
+              <button className="menu-item" onClick={handleGST}>
+                <TaxIcon />
+                <span>GST</span>
               </button>
               <button className="menu-item" onClick={handleAnalytics}>
                 <ChartIcon />

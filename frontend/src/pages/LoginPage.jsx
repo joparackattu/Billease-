@@ -5,7 +5,7 @@ import { UserIcon, LoaderIcon } from '../components/Icons'
 import './LoginPage.css'
 
 // Get API URL for debugging
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_BASE_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`
 
 function LoginPage() {
   const navigate = useNavigate()
@@ -75,6 +75,22 @@ function LoginPage() {
     }
   }
 
+  // Validation functions
+  const validateEmail = (email) => {
+    if (!email || email.trim() === '') return true // Optional field
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    return emailRegex.test(email)
+  }
+
+  const validatePhone = (phone) => {
+    if (!phone || phone.trim() === '') return true // Optional field
+    // Remove spaces, dashes, parentheses, and plus signs for validation
+    const cleaned = phone.replace(/[\s\-\(\)\+]/g, '')
+    // Indian phone: 10 digits, optionally with country code 91
+    const phoneRegex = /^(91)?[6-9]\d{9}$/
+    return phoneRegex.test(cleaned) && cleaned.length >= 10 && cleaned.length <= 12
+  }
+
   const handleRegister = async (e) => {
     e.preventDefault()
     setLoading(true)
@@ -82,6 +98,20 @@ function LoginPage() {
 
     if (formData.password.length < 6) {
       setError('Password must be at least 6 characters')
+      setLoading(false)
+      return
+    }
+
+    // Validate email if provided
+    if (formData.email && !validateEmail(formData.email)) {
+      setError('Please enter a valid email address')
+      setLoading(false)
+      return
+    }
+
+    // Validate phone if provided
+    if (formData.phone && !validatePhone(formData.phone)) {
+      setError('Please enter a valid phone number (10 digits, Indian format)')
       setLoading(false)
       return
     }

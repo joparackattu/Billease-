@@ -85,6 +85,9 @@ class ObjectDetectionModel:
                     logger.info(f"   Trained model classes: {len(classes)} items")
             else:
                 logger.warning(f"Trained model not found at {self.model_path}")
+                print("⚠️  Office model missing: pen, mouse, book, etc. will NOT be detected.")
+                print("   Only COCO items work (apple, banana, orange, bottle, cup, bowl).")
+                print("   Add models/item_detection.pt (YOLOv8 trained on office items) to detect pen.")
                 logger.info("Will use COCO model only for now.")
         except Exception as e:
             logger.error(f"Error loading trained model: {str(e)}")
@@ -399,11 +402,11 @@ class ObjectDetectionModel:
                 item_name = det["item_name"]
                 confidence = det["confidence"]
                 
-                # Apply item-specific thresholds (higher for small items)
+                # Apply item-specific thresholds (pens/mice are small and often get lower confidence)
                 if item_name == "mouse":
-                    min_confidence = 0.7  # High threshold (0.6-0.8 range) for mouse
+                    min_confidence = 0.55  # Mouse can be small in frame
                 elif item_name == "pen":
-                    min_confidence = 0.65  # High threshold (0.6-0.8 range) for pen
+                    min_confidence = 0.35  # Pen is small; lower threshold so it gets detected
                 elif item_name in coco_items:
                     min_confidence = 0.5  # Global minimum for fruits
                 else:

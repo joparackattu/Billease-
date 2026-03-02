@@ -284,6 +284,14 @@
   border: 1px solid var(--border-light);
 }
 
+.item-rank {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--primary-color);
+  min-width: 40px;
+  text-align: center;
+}
+
 .item-info {
   flex: 1;
   min-width: 0;

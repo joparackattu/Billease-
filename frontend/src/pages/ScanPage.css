@@ -70,6 +70,14 @@
   color: var(--text-secondary);
 }
 
+.camera-placeholder-hint {
+  font-size: var(--font-size-sm, 0.875rem) !important;
+  color: var(--text-tertiary, #888) !important;
+  margin-top: var(--spacing-xs, 4px) !important;
+  padding: 0 1rem;
+  text-align: center;
+}
+
 /* Scan Button */
 .scan-button {
   width: 100%;

@@ -12,7 +12,7 @@ The server will start at: http://localhost:8000
 API documentation will be available at: http://localhost:8000/docs
 """
 
-from fastapi import FastAPI, HTTPException, Query, Depends, Header
+from fastapi import FastAPI, HTTPException, Query, Depends, Header, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, Response, HTMLResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -24,12 +24,13 @@ import os
 import asyncio
 import sqlite3
 from io import BytesIO
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from app.models.schemas import (
     ScanItemRequest, ScanItemResponse, BillItem,
     LoginRequest, LoginResponse, RegisterRequest, UpdateProfileRequest,
     PriceUpdateRequest, BulkPriceUpdateRequest, PricesResponse,
+    ItemUpdateRequest, ItemCreateRequest, ItemResponse,
     BillHistoryResponse, BillHistoryItem,
     StatisticsResponse
 )
@@ -48,7 +49,7 @@ logger = logging.getLogger(__name__)
 # Working format discovered: /stream1
 RTSP_URL = os.getenv(
     "RTSP_URL", 
-    "rtsp://Billease:9061rwoqqp@172.20.10.13:554/stream1"
+    "rtsp://Billease:12344321@172.20.10.13:554/stream1"
 )
 
 # Initialize camera service
@@ -140,10 +141,10 @@ async def startup_event():
     
     # Set default ROI (Region of Interest) permanently
     # This crops the camera feed to focus on the platform area
-    DEFAULT_ROI_X = 310
+    DEFAULT_ROI_X = 450
     DEFAULT_ROI_Y = 20
-    DEFAULT_ROI_WIDTH = 650
-    DEFAULT_ROI_HEIGHT = 650
+    DEFAULT_ROI_WIDTH = 950
+    DEFAULT_ROI_HEIGHT = 900
     
     print("📐 Setting default ROI (Region of Interest)...")
     try:
@@ -448,11 +449,21 @@ async def update_profile(
 @app.get("/prices", response_model=PricesResponse)
 async def get_prices(session: dict = Depends(require_auth)):
     """
-    Get all prices for the current shopkeeper.
+    Get all prices for the current shopkeeper (backward compatible).
     """
     shopkeeper_id = session["shopkeeper_id"]
     prices = db.get_all_prices(shopkeeper_id)
     return PricesResponse(prices=prices)
+
+
+@app.get("/prices/items", response_model=List[ItemResponse])
+async def get_all_items(session: dict = Depends(require_auth)):
+    """
+    Get all items with complete details (cost price, selling price, pricing type).
+    """
+    shopkeeper_id = session["shopkeeper_id"]
+    items = db.get_all_items(shopkeeper_id)
+    return [ItemResponse(**item) for item in items]
 
 
 @app.put("/prices/{item_name}", response_model=dict)
@@ -462,7 +473,7 @@ async def update_price(
     session: dict = Depends(require_auth)
 ):
     """
-    Update price for a specific item.
+    Update price for a specific item (backward compatible).
     """
     shopkeeper_id = session["shopkeeper_id"]
     db.set_price(shopkeeper_id, item_name, request.price_per_kg)
@@ -471,6 +482,51 @@ async def update_price(
         "item_name": item_name,
         "price_per_kg": request.price_per_kg
     }
+
+
+@app.put("/prices/{item_name}/details", response_model=ItemResponse)
+async def update_item_details(
+    item_name: str,
+    request: ItemUpdateRequest,
+    session: dict = Depends(require_auth)
+):
+    """
+    Update item details including cost price, selling price, and pricing type.
+    """
+    shopkeeper_id = session["shopkeeper_id"]
+    db.update_item(
+        shopkeeper_id=shopkeeper_id,
+        item_name=item_name,
+        cost_price=request.cost_price,
+        selling_price=request.selling_price,
+        pricing_type=request.pricing_type
+    )
+    item = db.get_item_details(shopkeeper_id, item_name)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return ItemResponse(**item)
+
+
+@app.post("/prices/items", response_model=ItemResponse)
+async def create_item(
+    request: ItemCreateRequest,
+    session: dict = Depends(require_auth)
+):
+    """
+    Create a new item with cost price, selling price, and pricing type.
+    """
+    shopkeeper_id = session["shopkeeper_id"]
+    db.create_item(
+        shopkeeper_id=shopkeeper_id,
+        item_name=request.item_name,
+        cost_price=request.cost_price,
+        selling_price=request.selling_price,
+        pricing_type=request.pricing_type
+    )
+    item = db.get_item_details(shopkeeper_id, request.item_name)
+    if not item:
+        raise HTTPException(status_code=500, detail="Failed to create item")
+    return ItemResponse(**item)
 
 
 @app.put("/prices", response_model=dict)
@@ -519,6 +575,7 @@ async def get_bill_history(
 
 @app.post("/bills/save", response_model=dict)
 async def save_bill(
+    request: dict = Body(...),
     session_id: str = Query(...),
     session: dict = Depends(require_auth)
 ):
@@ -531,7 +588,19 @@ async def save_bill(
     if not bill_session.items:
         raise HTTPException(status_code=400, detail="Bill is empty")
     
-    # Convert BillItems to dicts (include pricing_type and quantity)
+    # Get unpaid parameters from request body
+    is_unpaid = request.get("is_unpaid", False)
+    customer_name = request.get("customer_name")
+    customer_phone = request.get("customer_phone")
+    
+    # Validate unpaid requirements
+    if is_unpaid:
+        if not customer_name or not customer_name.strip():
+            raise HTTPException(status_code=400, detail="Customer name is required for unpaid bills")
+        # Phone is optional - will be looked up from customer name if not provided
+    # Note: For paid bills, customer_name and customer_phone are optional but will create customer if both provided
+    
+    # Convert BillItems to dicts (include pricing_type, quantity, gst_rate, gst_amount)
     items = [
         {
             "item_name": item.item_name,
@@ -539,16 +608,24 @@ async def save_bill(
             "price_per_kg": item.price_per_kg,
             "total_price": item.total_price,
             "quantity": getattr(item, 'quantity', 1),
-            "pricing_type": getattr(item, 'pricing_type', 'weight')
+            "pricing_type": getattr(item, 'pricing_type', 'weight'),
+            "gst_rate": getattr(item, 'gst_rate', 0),
+            "gst_amount": getattr(item, 'gst_amount', 0),
         }
         for item in bill_session.items
     ]
     
-    bill_number = db.save_bill(
-        shopkeeper_id=shopkeeper_id,
-        items=items,
-        total_amount=bill_session.get_total()
-    )
+    try:
+        bill_number = db.save_bill(
+            shopkeeper_id=shopkeeper_id,
+            items=items,
+            total_amount=bill_session.get_total(),
+            is_unpaid=is_unpaid,
+            customer_name=customer_name.strip() if customer_name else None,
+            customer_phone=customer_phone.strip() if customer_phone else None
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     
     # Clear the session after saving
     bill_manager.clear_session(session_id)
@@ -560,27 +637,265 @@ async def save_bill(
     }
 
 
-# ==================== STATISTICS ENDPOINT ====================
+# ==================== CUSTOMERS & ACCOUNTS ENDPOINTS ====================
+
+@app.get("/accounts/customers", response_model=dict)
+async def get_customers_with_pending(
+    session: dict = Depends(require_auth)
+):
+    """
+    Get all customers with pending (unpaid) bills and their total pending amount.
+    """
+    shopkeeper_id = session["shopkeeper_id"]
+    customers = db.get_customers_with_pending(shopkeeper_id)
+    
+    return {
+        "customers": customers,
+        "total": len(customers)
+    }
+
+
+@app.get("/accounts/customers/{customer_id}/bills", response_model=dict)
+async def get_customer_unpaid_bills(
+    customer_id: int,
+    session: dict = Depends(require_auth)
+):
+    """
+    Get all unpaid bills for a specific customer.
+    """
+    shopkeeper_id = session["shopkeeper_id"]
+    bills = db.get_customer_unpaid_bills(shopkeeper_id, customer_id)
+    
+    return {
+        "bills": bills,
+        "total": len(bills)
+    }
+
+
+@app.get("/customers", response_model=dict)
+async def get_all_customers(
+    session: dict = Depends(require_auth)
+):
+    """
+    Get all customers for the authenticated shopkeeper.
+    """
+    shopkeeper_id = session["shopkeeper_id"]
+    customers = db.get_all_customers(shopkeeper_id)
+    
+    return {
+        "customers": customers,
+        "total": len(customers)
+    }
+
+
+@app.post("/customers", response_model=dict)
+async def create_customer(
+    request: dict = Body(...),
+    session: dict = Depends(require_auth)
+):
+    """
+    Create a new customer.
+    """
+    shopkeeper_id = session["shopkeeper_id"]
+    name = request.get("name", "").strip()
+    phone = request.get("phone", "").strip()
+    
+    if not name:
+        raise HTTPException(status_code=400, detail="Customer name is required")
+    
+    if not phone:
+        raise HTTPException(status_code=400, detail="Customer phone is required")
+    
+    try:
+        customer_id = db.create_customer(shopkeeper_id, name, phone)
+        customer = db.get_customer_by_name(shopkeeper_id, name)
+        
+        return {
+            "message": "Customer created successfully",
+            "customer_id": customer_id,
+            "customer": customer
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/customers/{customer_id}", response_model=dict)
+async def delete_customer(
+    customer_id: int,
+    session: dict = Depends(require_auth)
+):
+    """
+    Delete a customer (only if they have no unpaid bills).
+    """
+    shopkeeper_id = session["shopkeeper_id"]
+    
+    try:
+        success = db.delete_customer(shopkeeper_id, customer_id)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Customer not found")
+        
+        return {
+            "message": "Customer deleted successfully"
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ==================== LOGISTICS / STOCK ENDPOINTS ====================
+
+@app.get("/logistics/stock", response_model=dict)
+async def get_stock_list(session: dict = Depends(require_auth)):
+    """
+    Get all stock items (inventory) for the current shopkeeper.
+    Quantities are deducted automatically when bills are saved.
+    """
+    shopkeeper_id = session["shopkeeper_id"]
+    items = db.get_stock_list(shopkeeper_id)
+    return {"stock": items}
+
+
+@app.post("/logistics/stock", response_model=dict)
+async def add_or_update_stock(
+    request: dict = Body(...),
+    session: dict = Depends(require_auth)
+):
+    """
+    Add a new stock item or set quantity for existing item (per shopkeeper).
+    Body: { "item_name": "...", "quantity": number, "unit": "kg" | "unit" | "ltr" }
+    """
+    shopkeeper_id = session["shopkeeper_id"]
+    item_name = (request.get("item_name") or "").strip()
+    quantity = request.get("quantity")
+    unit = (request.get("unit") or "kg").strip().lower() or "kg"
+    if not item_name:
+        raise HTTPException(status_code=400, detail="Item name is required")
+    try:
+        quantity = float(quantity)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Quantity must be a number")
+    if quantity < 0:
+        raise HTTPException(status_code=400, detail="Quantity cannot be negative")
+    try:
+        row = db.add_or_update_stock(shopkeeper_id, item_name, quantity, unit=unit)
+        return {"message": "Stock updated successfully", "stock": row}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.put("/logistics/stock/{item_name:path}", response_model=dict)
+async def update_stock_quantity(
+    item_name: str,
+    request: dict = Body(...),
+    session: dict = Depends(require_auth)
+):
+    """
+    Update quantity/unit for an existing stock item.
+    Body: { "quantity": number, "unit": "kg" | "unit" | "ltr" (optional) }
+    """
+    shopkeeper_id = session["shopkeeper_id"]
+    quantity = request.get("quantity")
+    unit = (request.get("unit") or "kg").strip().lower() or "kg"
+    try:
+        quantity = float(quantity)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Quantity must be a number")
+    if quantity < 0:
+        raise HTTPException(status_code=400, detail="Quantity cannot be negative")
+    try:
+        row = db.add_or_update_stock(shopkeeper_id, item_name.strip(), quantity, unit=unit)
+        return {"message": "Stock updated successfully", "stock": row}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/logistics/stock/{item_name:path}", response_model=dict)
+async def delete_stock_item(
+    item_name: str,
+    session: dict = Depends(require_auth)
+):
+    """Remove an item from stock."""
+    shopkeeper_id = session["shopkeeper_id"]
+    deleted = db.delete_stock_item(shopkeeper_id, item_name.strip())
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Stock item not found")
+    return {"message": "Stock item removed"}
+
+
+@app.post("/accounts/bills/{bill_id}/mark-paid", response_model=dict)
+async def mark_bill_as_paid(
+    bill_id: int,
+    session: dict = Depends(require_auth)
+):
+    """
+    Mark a bill as paid (set is_unpaid to 0).
+    """
+    shopkeeper_id = session["shopkeeper_id"]
+    success = db.mark_bill_as_paid(shopkeeper_id, bill_id)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Bill not found or already paid")
+    
+    return {
+        "message": "Bill marked as paid successfully",
+        "bill_id": bill_id
+    }
+
+
+# ==================== STATISTICS, ANALYTICS & GST ENDPOINTS ====================
 
 @app.get("/statistics", response_model=StatisticsResponse)
 async def get_statistics(
     period: str = Query("days", regex="^(days|months)$"),
-    session: dict = Depends(require_auth)
+    session: dict = Depends(require_auth),
 ):
-    """
-    Get business statistics for the current shopkeeper.
-    
-    Args:
-        period: "days" or "months" for grouping earnings
-        session: Shopkeeper session (from authentication)
-    
-    Returns:
-        StatisticsResponse: Earnings data and most sold items
-    """
+    """Get business statistics for the current shopkeeper (quick overview)."""
     shopkeeper_id = session["shopkeeper_id"]
     stats = db.get_statistics(shopkeeper_id, period=period)
-    
     return StatisticsResponse(**stats)
+
+
+@app.get("/analytics", response_model=dict)
+async def get_analytics(session: dict = Depends(require_auth)):
+    """
+    Deeper analytics for the Analytics page: summary, top items by revenue,
+    bills by day of week, low stock.
+    """
+    shopkeeper_id = session["shopkeeper_id"]
+    return db.get_analytics(shopkeeper_id)
+
+
+@app.get("/gst/settings", response_model=dict)
+async def get_gst_settings(session: dict = Depends(require_auth)):
+    """
+    Get GST category settings for the current shopkeeper.
+    Ensures default categories exist if none are configured yet.
+    """
+    shopkeeper_id = session["shopkeeper_id"]
+    settings = db.get_gst_settings(shopkeeper_id)
+    return {"categories": settings}
+
+
+@app.put("/gst/settings/{category_key}", response_model=dict)
+async def update_gst_setting(
+    category_key: str,
+    request: dict = Body(...),
+    session: dict = Depends(require_auth),
+):
+    """
+    Update GST rate for a category.
+    Body: { "rate": number }
+    """
+    shopkeeper_id = session["shopkeeper_id"]
+    rate = request.get("rate")
+    try:
+        rate = float(rate)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="GST rate must be a number")
+    if rate < 0:
+        raise HTTPException(status_code=400, detail="GST rate cannot be negative")
+    updated = db.update_gst_rate(shopkeeper_id, category_key, rate)
+    return {"message": "GST rate updated", "category": updated}
 
 
 @app.get("/test-camera")
@@ -702,47 +1017,71 @@ async def camera_status():
     return status
 
 
+def _make_camera_placeholder_jpeg(width: int = 640, height: int = 360) -> bytes:
+    """Generate a placeholder JPEG when camera is offline (gray image with text)."""
+    import numpy as np
+    img = np.zeros((height, width, 3), dtype=np.uint8)
+    img[:] = (60, 60, 60)  # Dark gray
+    # Draw "Camera offline" text
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    text = "Camera offline"
+    font_scale = min(width, height) / 400.0
+    thickness = max(1, int(font_scale * 2))
+    (tw, th), _ = cv2.getTextSize(text, font, font_scale, thickness)
+    x = (width - tw) // 2
+    y = (height + th) // 2
+    cv2.putText(img, text, (x, y), font, font_scale, (200, 200, 200), thickness, cv2.LINE_AA)
+    _, buffer = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+    return buffer.tobytes()
+
+
 @app.get("/camera/frame")
 async def camera_frame(max_width: int = 1280):
     """
     Get a single frame from the camera as a JPEG image (ZERO-LAG).
     
     Returns the latest cached frame from memory (never touches RTSP).
-    JPEG quality is set to 70 for optimal speed/quality balance.
+    When camera is offline, returns a placeholder image so the UI always has something to show.
     
     Args:
         max_width: Maximum width in pixels (default: 1280). Use 640 for faster/low-res.
     """
     try:
         # ZERO-LAG: capture_frame reads from memory only (no RTSP access)
-        # Background thread continuously updates the cached frame
         loop = asyncio.get_event_loop()
         frame_base64 = await loop.run_in_executor(
-            None,  # Use default executor
+            None,
             camera_service.capture_frame,
-            0,  # max_retries (ignored)
-            True,  # use_cache (ignored)
-            max_width  # max_width parameter
+            0,
+            True,
+            max_width,
         )
         
-        if not frame_base64:
-            raise HTTPException(
-                status_code=503,  # Service Unavailable
-                detail="Failed to capture frame from camera. Camera may be busy or offline."
-            )
-        
-        # Decode base64 to bytes
-        image_bytes = base64.b64decode(frame_base64)
+        if frame_base64:
+            image_bytes = base64.b64decode(frame_base64)
+            headers = {
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+                "X-Content-Type-Options": "nosniff",
+                "X-Camera-Status": "live",
+            }
+        else:
+            # Camera offline: return placeholder so frontend always gets a valid image
+            height = int(360 * max_width / 640) if max_width else 360
+            image_bytes = _make_camera_placeholder_jpeg(max_width or 640, height)
+            headers = {
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+                "X-Content-Type-Options": "nosniff",
+                "X-Camera-Status": "offline",
+            }
         
         return Response(
             content=image_bytes,
             media_type="image/jpeg",
-            headers={
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-                "Pragma": "no-cache",
-                "Expires": "0",
-                "X-Content-Type-Options": "nosniff"
-            }
+            headers=headers,
         )
     except asyncio.TimeoutError:
         raise HTTPException(
@@ -751,10 +1090,22 @@ async def camera_frame(max_width: int = 1280):
         )
     except Exception as e:
         logger.error(f"Error in camera_frame: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error capturing frame: {str(e)}"
-        )
+        # Still return placeholder on error so UI doesn't break
+        try:
+            image_bytes = _make_camera_placeholder_jpeg(min(max_width, 640), 360)
+            return Response(
+                content=image_bytes,
+                media_type="image/jpeg",
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "X-Camera-Status": "offline",
+                },
+            )
+        except Exception:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error capturing frame: {str(e)}"
+            )
 
 
 @app.post("/camera/set-roi")
@@ -1013,7 +1364,7 @@ async def camera_view():
     </head>
     <body>
         <div class="container">
-            <h1>📷 BILLESE Camera Feed</h1>
+            <h1> BILLESE Camera Feed</h1>
             <div id="status" class="status">Checking connection...</div>
             <img id="cameraImage" src="/camera/frame?max_width=1280" alt="Camera Feed" 
                  style="max-width: 1280px; max-height: 720px;"
@@ -1022,10 +1373,10 @@ async def camera_view():
                 <p><strong>Camera Status:</strong> <span id="statusText">Loading...</span></p>
                 <p><strong>Last Update:</strong> <span id="lastUpdate">-</span></p>
                 <p><strong>ROI:</strong> <span id="roiStatus">Checking...</span></p>
-                <button onclick="refreshFrame()">🔄 Refresh Now</button>
-                <button onclick="location.reload()">🔄 Reload Page</button>
-                <button onclick="detectPlatform()">🎯 Auto-Detect Platform</button>
-                <button onclick="clearROI()">❌ Clear ROI</button>
+                <button onclick="refreshFrame()"> Refresh Now</button>
+                <button onclick="location.reload()"> Reload Page</button>
+                <button onclick="detectPlatform()"> Auto-Detect Platform</button>
+                <button onclick="clearROI()"> Clear ROI</button>
             </div>
             <div class="info" style="margin-top: 20px;">
                 <h3>Set ROI Manually</h3>
@@ -1035,10 +1386,10 @@ async def camera_view():
                     <label>Y: <input type="number" id="roiY" placeholder="y" style="width: 80px; padding: 5px; color: black;"></label>
                     <label>Width: <input type="number" id="roiW" placeholder="width" style="width: 80px; padding: 5px; color: black;"></label>
                     <label>Height: <input type="number" id="roiH" placeholder="height" style="width: 80px; padding: 5px; color: black;"></label>
-                    <button onclick="setROI()">✅ Set ROI</button>
+                    <button onclick="setROI()"> Set ROI</button>
                 </div>
                 <p style="font-size: 12px; color: #aaa; margin-top: 10px;">
-                    💡 Tip: Right-click the image → Inspect → Hover to see pixel coordinates, or use Auto-Detect
+                     Tip: Right-click the image → Inspect → Hover to see pixel coordinates, or use Auto-Detect
                 </p>
             </div>
         </div>
@@ -1054,14 +1405,14 @@ async def camera_view():
             
             function handleSuccess() {
                 document.getElementById('status').className = 'status connected';
-                document.getElementById('statusText').textContent = '✅ Connected';
+                document.getElementById('statusText').textContent = ' Connected';
                 updateTime();
                 updateCount++;
             }
             
             function handleError() {
                 document.getElementById('status').className = 'status disconnected';
-                document.getElementById('statusText').textContent = '❌ Connection Failed';
+                document.getElementById('statusText').textContent = ' Connection Failed';
                 lastError = new Date();
             }
             
@@ -1122,10 +1473,10 @@ async def camera_view():
                     }
                     
                     const data = await response.json();
-                    alert('✅ ROI set successfully! Detection will now use only this region.');
+                    alert(' ROI set successfully! Detection will now use only this region.');
                     loadROIStatus();
                 } catch (e) {
-                    alert('❌ Error setting ROI: ' + (e.message || e));
+                    alert(' Error setting ROI: ' + (e.message || e));
                 }
             }
             
@@ -1142,12 +1493,12 @@ async def camera_view():
                         document.getElementById('roiY').value = data.detected_region.y;
                         document.getElementById('roiW').value = data.detected_region.width;
                         document.getElementById('roiH').value = data.detected_region.height;
-                        alert('✅ Platform detected! ROI coordinates filled in. Click "Set ROI" to apply.');
+                        alert(' Platform detected! ROI coordinates filled in. Click "Set ROI" to apply.');
                         loadROIStatus();
                     }
                 } catch (e) {
                     const errorText = await e.response?.json() || { detail: e.message };
-                    alert('❌ Error detecting platform: ' + (errorText.detail || e.message));
+                    alert(' Error detecting platform: ' + (errorText.detail || e.message));
                 }
             }
             
@@ -1162,10 +1513,10 @@ async def camera_view():
                     document.getElementById('roiY').value = '';
                     document.getElementById('roiW').value = '';
                     document.getElementById('roiH').value = '';
-                    alert('✅ ROI cleared! Using full frame for detection.');
+                    alert(' ROI cleared! Using full frame for detection.');
                     loadROIStatus();
                 } catch (e) {
-                    alert('❌ Error clearing ROI: ' + e.message);
+                    alert(' Error clearing ROI: ' + e.message);
                 }
             }
             
@@ -1313,7 +1664,7 @@ async def detection_view():
     </head>
     <body>
         <div class="container">
-            <h1>🔍 BILLESE - Detection Testing View</h1>
+            <h1> BILLESE - Detection Testing View</h1>
             <p style="color: #aaa;">This is a testing window to see how the system detects items with bounding boxes.</p>
             
             <div id="status" class="status">Checking connection...</div>
@@ -1324,8 +1675,8 @@ async def detection_view():
             
             <div class="legend">
                 <h3>Legend</h3>
-                <div class="legend-item legend-coco">🟢 Green Boxes = COCO Model (fruits/vegetables)</div>
-                <div class="legend-item legend-trained">🔵 Blue Boxes = Trained Model (office items)</div>
+                <div class="legend-item legend-coco"> Green Boxes = COCO Model (fruits/vegetables)</div>
+                <div class="legend-item legend-trained"> Blue Boxes = Trained Model (office items)</div>
             </div>
             
             <div class="info">
@@ -1339,9 +1690,9 @@ async def detection_view():
             </div>
             
             <div style="margin-top: 20px;">
-                <button onclick="refreshFrame()">🔄 Refresh Now</button>
-                <button onclick="location.reload()">🔄 Reload Page</button>
-                <button onclick="toggleAutoRefresh()">⏸️ Pause Auto-Refresh</button>
+                <button onclick="refreshFrame()"> Refresh Now</button>
+                <button onclick="location.reload()"> Reload Page</button>
+                <button onclick="toggleAutoRefresh()"> Pause Auto-Refresh</button>
             </div>
         </div>
         
@@ -1357,14 +1708,14 @@ async def detection_view():
             
             function handleSuccess() {
                 document.getElementById('status').className = 'status connected';
-                document.getElementById('statusText').textContent = '✅ Connected';
+                document.getElementById('statusText').textContent = ' Connected';
                 updateTime();
                 updateCount++;
             }
             
             function handleError() {
                 document.getElementById('status').className = 'status disconnected';
-                document.getElementById('statusText').textContent = '❌ Connection Failed';
+                document.getElementById('statusText').textContent = ' Connection Failed';
             }
             
             function updateDetections() {
@@ -1405,10 +1756,10 @@ async def detection_view():
                 autoRefreshEnabled = !autoRefreshEnabled;
                 const button = event.target;
                 if (autoRefreshEnabled) {
-                    button.textContent = '⏸️ Pause Auto-Refresh';
+                    button.textContent = ' Pause Auto-Refresh';
                     startAutoRefresh();
                 } else {
-                    button.textContent = '▶️ Resume Auto-Refresh';
+                    button.textContent = ' Resume Auto-Refresh';
                     stopAutoRefresh();
                 }
             }
@@ -1701,7 +2052,7 @@ async def crop_viewer():
     </head>
     <body>
         <div class="container">
-            <h1>📐 BILLESE - Crop Region Selector</h1>
+            <h1> BILLESE - Crop Region Selector</h1>
             
             <div class="status info">
                 <strong>Instructions:</strong> Draw a rectangle on the camera feed to select the crop region, 
@@ -1723,10 +2074,10 @@ async def crop_viewer():
                     <input type="number" id="cropHeight" value="480" min="1">
                 </div>
                 <div class="control-group">
-                    <button onclick="setCrop()">✅ Set Crop Region</button>
+                    <button onclick="setCrop()"> Set Crop Region</button>
                     <button onclick="clearCrop()" class="danger">❌ Clear Crop</button>
-                    <button onclick="loadCurrentCrop()">🔄 Load Current Settings</button>
-                    <button onclick="previewCrop()">👁️ Preview Crop</button>
+                    <button onclick="loadCurrentCrop()"> Load Current Settings</button>
+                    <button onclick="previewCrop()"> Preview Crop</button>
                 </div>
             </div>
             
@@ -1830,13 +2181,13 @@ async def crop_viewer():
                     const result = await response.json();
                     
                     document.getElementById('status').className = 'status success';
-                    document.getElementById('status').textContent = '✅ ' + result.message;
+                    document.getElementById('status').textContent = ' ' + result.message;
                     
                     loadCurrentCrop();
                     loadFrame();
                 } catch (error) {
                     document.getElementById('status').className = 'status';
-                    document.getElementById('status').textContent = '❌ Error: ' + error.message;
+                    document.getElementById('status').textContent = ' Error: ' + error.message;
                 }
             }
             
@@ -1847,14 +2198,14 @@ async def crop_viewer():
                     const result = await response.json();
                     
                     document.getElementById('status').className = 'status success';
-                    document.getElementById('status').textContent = '✅ ' + result.message;
+                    document.getElementById('status').textContent = ' ' + result.message;
                     
                     currentCrop = null;
                     loadCurrentCrop();
                     loadFrame();
                 } catch (error) {
                     document.getElementById('status').className = 'status';
-                    document.getElementById('status').textContent = '❌ Error: ' + error.message;
+                    document.getElementById('status').textContent = ' Error: ' + error.message;
                 }
             }
             
@@ -1871,10 +2222,10 @@ async def crop_viewer():
                         document.getElementById('cropWidth').value = currentCrop.width;
                         document.getElementById('cropHeight').value = currentCrop.height;
                         document.getElementById('currentCrop').innerHTML = 
-                            `✅ Active: x=${currentCrop.x}, y=${currentCrop.y}, width=${currentCrop.width}, height=${currentCrop.height}`;
+                            ` Active: x=${currentCrop.x}, y=${currentCrop.y}, width=${currentCrop.width}, height=${currentCrop.height}`;
                     } else {
                         currentCrop = null;
-                        document.getElementById('currentCrop').innerHTML = '❌ No crop set (using full frame)';
+                        document.getElementById('currentCrop').innerHTML = ' No crop set (using full frame)';
                     }
                 } catch (error) {
                     document.getElementById('currentCrop').innerHTML = 'Error loading crop settings';
@@ -2406,6 +2757,11 @@ async def scan_item(
             else:
                 total_price = item_info.total_price
             
+            # GST: get rate for this item's category (when shopkeeper is known)
+            shopkeeper_id = session["shopkeeper_id"] if session else 0
+            gst_rate = float(db.get_gst_rate_for_item(shopkeeper_id, item_info.name)) if shopkeeper_id else 0.0
+            gst_amount = round(total_price * gst_rate / 100.0, 2) if gst_rate else 0.0
+
             # Create a BillItem to add to the session
             bill_item = BillItem(
                 item_name=item_info.name,
@@ -2413,7 +2769,9 @@ async def scan_item(
                 price_per_kg=item_info.price_per_kg,
                 total_price=round(total_price, 2),
                 quantity=1,
-                pricing_type=pricing_type
+                pricing_type=pricing_type,
+                gst_rate=gst_rate,
+                gst_amount=gst_amount,
             )
             
             # Add item to the bill session
@@ -2467,13 +2825,15 @@ async def get_bill(session_id: str):
         session_id: The session ID to get the bill for
     
     Returns:
-        dict: Current bill information
+        dict: Current bill information (subtotal, gst_total, total, items)
     """
     session = bill_manager.get_session(session_id)
     return {
         "session_id": session.session_id,
         "items": session.items,
-        "total": round(session.get_total(), 2)
+        "subtotal": round(session.get_subtotal(), 2),
+        "gst_total": round(session.get_gst_total(), 2),
+        "total": round(session.get_total(), 2),
     }
 
 
@@ -2513,7 +2873,9 @@ async def remove_bill_item(session_id: str, item_index: int):
         "message": "Item removed successfully",
         "session_id": session.session_id,
         "items": session.items,
-        "total": round(session.get_total(), 2)
+        "subtotal": round(session.get_subtotal(), 2),
+        "gst_total": round(session.get_gst_total(), 2),
+        "total": round(session.get_total(), 2),
     }
 
 
@@ -2566,7 +2928,9 @@ async def add_item_directly(
     session_id: str,
     item_name: str = Query(...),
     weight_grams: float = Query(...),
-    price_per_kg: float = Query(None)
+    price_per_kg: float = Query(None),
+    pricing_type: str = Query(None),
+    session: Optional[dict] = Depends(get_current_shopkeeper),
 ):
     """
     Directly add an item to the bill without detection.
@@ -2579,6 +2943,7 @@ async def add_item_directly(
         item_name: Name of the item
         weight_grams: Weight in grams
         price_per_kg: Optional price per kg (will be calculated if not provided)
+        pricing_type: Optional pricing type ('kg', 'units', 'ltr', 'weight', 'piece')
     
     Returns:
         dict: Updated bill information
@@ -2586,28 +2951,41 @@ async def add_item_directly(
     if weight_grams <= 0:
         raise HTTPException(status_code=400, detail="Weight must be greater than 0")
     
-    # Determine pricing type first
-    from app.services.item_detection import PER_PIECE_ITEMS
-    is_per_piece = item_name.lower() in PER_PIECE_ITEMS
-    pricing_type = "piece" if is_per_piece else "weight"
+    # Determine pricing type - use provided pricing_type or fall back to detection
+    if pricing_type:
+        # Map database pricing types to bill pricing types
+        if pricing_type in ['units']:
+            pricing_type_bill = "piece"
+        else:
+            pricing_type_bill = "weight"
+    else:
+        # Fall back to detection-based logic
+        from app.services.item_detection import PER_PIECE_ITEMS
+        is_per_piece = item_name.lower() in PER_PIECE_ITEMS
+        pricing_type_bill = "piece" if is_per_piece else "weight"
     
     # Get item info (calculates price if not provided)
     if price_per_kg is None:
         item_info = get_item_info(item_name, weight_grams)
         price_per_kg = item_info.price_per_kg
         # For per-piece items, total_price is price per piece (quantity starts at 1)
-        if is_per_piece:
+        if pricing_type_bill == "piece":
             total_price = price_per_kg * 1  # Start with quantity 1
         else:
             total_price = item_info.total_price
     else:
         # Calculate total price based on pricing type
-        if is_per_piece:
+        if pricing_type_bill == "piece":
             total_price = price_per_kg * 1  # Per piece, quantity starts at 1
         else:
             weight_kg = weight_grams / 1000.0
             total_price = price_per_kg * weight_kg
     
+    # GST: get rate for this item's category when shopkeeper is known
+    shopkeeper_id = session["shopkeeper_id"] if session else 0
+    gst_rate = float(db.get_gst_rate_for_item(shopkeeper_id, item_name)) if shopkeeper_id else 0.0
+    gst_amount = round(total_price * gst_rate / 100.0, 2) if gst_rate else 0.0
+
     # Create bill item
     bill_item = BillItem(
         item_name=item_name,
@@ -2615,7 +2993,9 @@ async def add_item_directly(
         price_per_kg=price_per_kg,
         total_price=round(total_price, 2),
         quantity=1,
-        pricing_type=pricing_type
+        pricing_type=pricing_type_bill,
+        gst_rate=gst_rate,
+        gst_amount=gst_amount,
     )
     
     # Add to session
@@ -2625,12 +3005,14 @@ async def add_item_directly(
     # The state machine will handle automatic detection separately
     
     # Get updated session
-    session = bill_manager.get_session(session_id)
+    sess = bill_manager.get_session(session_id)
     return {
         "message": "Item added successfully",
-        "session_id": session.session_id,
-        "items": session.items,
-        "total": round(session.get_total(), 2)
+        "session_id": sess.session_id,
+        "items": sess.items,
+        "subtotal": round(sess.get_subtotal(), 2),
+        "gst_total": round(sess.get_gst_total(), 2),
+        "total": round(sess.get_total(), 2),
     }
 
 
@@ -2671,12 +3053,18 @@ async def update_bill_item(session_id: str, item_index: int, weight_grams: float
         item.total_price = round(item.price_per_kg * weight_kg, 2)
     else:
         raise HTTPException(status_code=400, detail="Either weight_grams or quantity must be provided")
+
+    # Recalculate GST amount when price changes
+    gst_rate = getattr(item, "gst_rate", 0) or 0
+    item.gst_amount = round(item.total_price * gst_rate / 100.0, 2)
     
     return {
         "message": "Item updated successfully",
         "session_id": session.session_id,
         "items": session.items,
-        "total": round(session.get_total(), 2)
+        "subtotal": round(session.get_subtotal(), 2),
+        "gst_total": round(session.get_gst_total(), 2),
+        "total": round(session.get_total(), 2),
     }
 
 

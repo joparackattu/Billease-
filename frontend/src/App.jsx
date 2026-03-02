@@ -6,6 +6,11 @@ import HistoryPage from './pages/HistoryPage'
 import LoginPage from './pages/LoginPage'
 import PricePage from './pages/PricePage'
 import StatisticsPage from './pages/StatisticsPage'
+import AccountsPage from './pages/AccountsPage'
+import CustomersPage from './pages/CustomersPage'
+import LogisticsPage from './pages/LogisticsPage'
+import GSTPage from './pages/GSTPage'
+import AnalyticsPage from './pages/AnalyticsPage'
 import BottomNav from './components/BottomNav'
 import ProfileDropdown from './components/ProfileDropdown'
 import './App.css'
@@ -63,26 +68,62 @@ function AppLayout({ children }) {
     
     loadShopkeeper()
 
+    // Track last load time to prevent excessive calls
+    let lastLoadTime = 0
+    const MIN_LOAD_INTERVAL = 2000 // Minimum 2 seconds between loads
+
     // Listen for storage changes (when login happens)
     const handleStorageChange = () => {
+      const now = Date.now()
+      if (now - lastLoadTime < MIN_LOAD_INTERVAL) {
+        return // Skip if called too recently
+      }
+      lastLoadTime = now
       loadShopkeeper()
     }
 
     // Listen for auth changes (custom event from login)
     const handleAuthChange = () => {
+      const now = Date.now()
+      if (now - lastLoadTime < MIN_LOAD_INTERVAL) {
+        return // Skip if called too recently
+      }
+      lastLoadTime = now
       loadShopkeeper()
+    }
+
+    // Debounced focus handler to prevent excessive calls
+    let focusTimeout = null
+    const handleFocus = () => {
+      // Clear any pending focus handler
+      if (focusTimeout) {
+        clearTimeout(focusTimeout)
+      }
+      // Only trigger after a delay (debounce)
+      focusTimeout = setTimeout(() => {
+        const now = Date.now()
+        if (now - lastLoadTime < MIN_LOAD_INTERVAL) {
+          return // Skip if called too recently
+        }
+        lastLoadTime = now
+        loadShopkeeper()
+      }, 500) // Wait 500ms after focus before loading
     }
 
     window.addEventListener('storage', handleStorageChange)
     window.addEventListener('auth-change', handleAuthChange)
     
     // Also check on focus (in case login happened in same tab)
-    window.addEventListener('focus', handleStorageChange)
+    // But debounced to prevent excessive calls
+    window.addEventListener('focus', handleFocus)
 
     return () => {
       window.removeEventListener('storage', handleStorageChange)
       window.removeEventListener('auth-change', handleAuthChange)
-      window.removeEventListener('focus', handleStorageChange)
+      window.removeEventListener('focus', handleFocus)
+      if (focusTimeout) {
+        clearTimeout(focusTimeout)
+      }
     }
   }, [])
 
@@ -183,6 +224,46 @@ function App() {
                 <StatisticsPage />
               </ProtectedRoute>
             } 
+          />
+          <Route 
+            path="/accounts" 
+            element={
+              <ProtectedRoute>
+                <AccountsPage />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/customers" 
+            element={
+              <ProtectedRoute>
+                <CustomersPage />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/logistics" 
+            element={
+              <ProtectedRoute>
+                <LogisticsPage />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/gst" 
+            element={
+              <ProtectedRoute>
+                <GSTPage />
+              </ProtectedRoute>
+            } 
+          />
+          <Route
+            path="/analytics"
+            element={
+              <ProtectedRoute>
+                <AnalyticsPage />
+              </ProtectedRoute>
+            }
           />
         </Routes>
       </AppLayout>

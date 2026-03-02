@@ -8,7 +8,7 @@ function StatisticsPage() {
   const [period, setPeriod] = useState('days')
   const [statistics, setStatistics] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [sortOrder, setSortOrder] = useState('most') // 'most' or 'least'
+  const [sortBy, setSortBy] = useState('most') // 'most' or 'least'
 
   useEffect(() => {
     loadStatistics()
@@ -44,14 +44,20 @@ function StatisticsPage() {
   }
 
   const chartData = statistics?.earnings || []
-  const mostSoldItemsRaw = statistics?.most_sold_items || []
+  let mostSoldItems = statistics?.most_sold_items || []
   
-  // Sort items based on filter
-  const mostSoldItems = [...mostSoldItemsRaw].sort((a, b) => {
-    const aValue = a.total_quantity !== undefined ? a.total_quantity : (a.count || 0)
-    const bValue = b.total_quantity !== undefined ? b.total_quantity : (b.count || 0)
-    return sortOrder === 'most' ? bValue - aValue : aValue - bValue
-  })
+  // Sort most sold items based on selected sort option
+  if (sortBy === 'least') {
+    // Sort by quantity ascending (least sold first)
+    mostSoldItems = [...mostSoldItems].sort((a, b) => 
+      (a.total_quantity || 0) - (b.total_quantity || 0)
+    )
+  } else {
+    // Sort by quantity descending (most sold first - default)
+    mostSoldItems = [...mostSoldItems].sort((a, b) => 
+      (b.total_quantity || 0) - (a.total_quantity || 0)
+    )
+  }
   
   // Get the period label (month for days, year for months) - use the first one since all are the same
   const periodLabel = chartData.length > 0 && chartData[0]?.month_label ? chartData[0].month_label : ''
@@ -238,52 +244,45 @@ function StatisticsPage() {
       <div className="most-sold-section">
         <div className="section-header">
           <h3 className="section-title">Most Sold Items</h3>
-          <div className="sort-filter">
-            <button
-              className={`sort-btn ${sortOrder === 'most' ? 'active' : ''}`}
-              onClick={() => setSortOrder('most')}
-            >
-              Most Sold
-            </button>
-            <button
-              className={`sort-btn ${sortOrder === 'least' ? 'active' : ''}`}
-              onClick={() => setSortOrder('least')}
-            >
-              Least Sold
-            </button>
-          </div>
+          {mostSoldItems.length > 0 && (
+            <div className="sort-filter">
+              <button
+                className={`sort-btn ${sortBy === 'most' ? 'active' : ''}`}
+                onClick={() => setSortBy('most')}
+              >
+                Most Sold
+              </button>
+              <button
+                className={`sort-btn ${sortBy === 'least' ? 'active' : ''}`}
+                onClick={() => setSortBy('least')}
+              >
+                Least Sold
+              </button>
+            </div>
+          )}
         </div>
         {mostSoldItems.length > 0 ? (
           <div className="items-list">
             {mostSoldItems.map((item, index) => {
-              // Handle both new format (total_quantity, unit_type) and old format (count)
-              const displayValue = item.total_quantity !== undefined ? item.total_quantity : (item.count || 0)
-              const unitType = item.unit_type || (item.total_quantity !== undefined ? 'units' : 'units')
-              // Calculate max quantity from all items (for bar scaling)
-              const maxQuantity = Math.max(...mostSoldItemsRaw.map(item => 
-                item.total_quantity !== undefined ? item.total_quantity : (item.count || 0)
-              ))
-              
-              const displayUnit = unitType === 'units' 
-                ? (displayValue === 1 ? 'unit' : 'units')
-                : 'kg'
+              // For progress bar, always use the maximum quantity from the original sorted list
+              const maxQuantity = Math.max(...mostSoldItems.map(i => i.total_quantity || 0))
+              const quantity = item.total_quantity || 0
+              const unitType = item.unit_type || 'kg'
+              const unitLabel = unitType === 'units' ? 'unit' : unitType
               
               return (
                 <div key={index} className="item-row">
                   <div className="item-info">
                     <div className="item-name">{item.item_name}</div>
                     <div className="item-count">
-                      {unitType === 'units' 
-                        ? `${Math.round(displayValue)} ${displayUnit}`
-                        : `${displayValue.toFixed(2)} ${displayUnit}`
-                      }
+                      {quantity} {unitLabel}{quantity !== 1 && unitType === 'units' ? 's' : ''}
                     </div>
                   </div>
                   <div className="item-bar-container">
                     <div 
                       className="item-bar"
                       style={{ 
-                        width: `${(displayValue / maxQuantity) * 100}%` 
+                        width: `${maxQuantity > 0 ? (quantity / maxQuantity) * 100 : 0}%` 
                       }}
                     ></div>
                   </div>

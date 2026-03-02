@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_BASE_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000`
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -80,7 +80,7 @@ export const clearBill = async (sessionId = 'default') => {
   }
 }
 
-export const addItemToBill = async (item, sessionId = 'default') => {
+export const addItemToBill = async (item, sessionId = 'default', pricingType = null) => {
   try {
     // Directly add item to bill without re-detection
     const params = {
@@ -89,6 +89,9 @@ export const addItemToBill = async (item, sessionId = 'default') => {
     }
     if (item.price_per_kg) {
       params.price_per_kg = item.price_per_kg
+    }
+    if (pricingType) {
+      params.pricing_type = pricingType
     }
     const response = await api.post(`/bill/${sessionId}/add-item`, null, {
       params: params
@@ -246,6 +249,21 @@ export const getPrices = async () => {
   }
 }
 
+export const getAllItems = async () => {
+  try {
+    const token = localStorage.getItem('authToken')
+    const response = await api.get('/prices/items', {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
+    return response.data
+  } catch (error) {
+    console.error('Get all items error:', error)
+    throw error
+  }
+}
+
 export const updatePrice = async (itemName, pricePerKg) => {
   try {
     const token = localStorage.getItem('authToken')
@@ -260,6 +278,46 @@ export const updatePrice = async (itemName, pricePerKg) => {
     return response.data
   } catch (error) {
     console.error('Update price error:', error)
+    throw error
+  }
+}
+
+export const updateItemDetails = async (itemName, costPrice, sellingPrice, pricingType) => {
+  try {
+    const token = localStorage.getItem('authToken')
+    const response = await api.put(`/prices/${itemName}/details`, {
+      item_name: itemName,
+      cost_price: costPrice,
+      selling_price: sellingPrice,
+      pricing_type: pricingType
+    }, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
+    return response.data
+  } catch (error) {
+    console.error('Update item details error:', error)
+    throw error
+  }
+}
+
+export const createItem = async (itemName, costPrice, sellingPrice, pricingType) => {
+  try {
+    const token = localStorage.getItem('authToken')
+    const response = await api.post('/prices/items', {
+      item_name: itemName,
+      cost_price: costPrice,
+      selling_price: sellingPrice,
+      pricing_type: pricingType
+    }, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
+    return response.data
+  } catch (error) {
+    console.error('Create item error:', error)
     throw error
   }
 }
@@ -333,7 +391,117 @@ export const updateProfile = async (profileData) => {
   }
 }
 
-export const saveBill = async (sessionId = 'default') => {
+export const getCustomersWithPending = async () => {
+  try {
+    const response = await api.get('/accounts/customers')
+    return response.data
+  } catch (error) {
+    console.error('Get customers error:', error)
+    throw error
+  }
+}
+
+export const getCustomerUnpaidBills = async (customerId) => {
+  try {
+    const response = await api.get(`/accounts/customers/${customerId}/bills`)
+    return response.data
+  } catch (error) {
+    console.error('Get customer bills error:', error)
+    throw error
+  }
+}
+
+export const markBillAsPaid = async (billId) => {
+  try {
+    const response = await api.post(`/accounts/bills/${billId}/mark-paid`)
+    return response.data
+  } catch (error) {
+    console.error('Mark bill as paid error:', error)
+    throw error
+  }
+}
+
+export const getAllCustomers = async () => {
+  try {
+    const response = await api.get('/customers')
+    return response.data
+  } catch (error) {
+    console.error('Get all customers error:', error)
+    throw error
+  }
+}
+
+export const createCustomer = async (name, phone) => {
+  try {
+    const response = await api.post('/customers', {
+      name,
+      phone
+    })
+    return response.data
+  } catch (error) {
+    console.error('Create customer error:', error)
+    throw error
+  }
+}
+
+export const deleteCustomer = async (customerId) => {
+  try {
+    const response = await api.delete(`/customers/${customerId}`)
+    return response.data
+  } catch (error) {
+    console.error('Delete customer error:', error)
+    throw error
+  }
+}
+
+// Logistics / Stock API
+export const getStockList = async () => {
+  try {
+    const response = await api.get('/logistics/stock')
+    return response.data
+  } catch (error) {
+    console.error('Get stock list error:', error)
+    throw error
+  }
+}
+
+export const addOrUpdateStockItem = async (itemName, quantity, unit = 'kg') => {
+  try {
+    const response = await api.post('/logistics/stock', {
+      item_name: itemName,
+      quantity: Number(quantity),
+      unit: unit === 'unit' || unit === 'units' ? 'unit' : (unit || 'kg')
+    })
+    return response.data
+  } catch (error) {
+    console.error('Add/update stock error:', error)
+    throw error
+  }
+}
+
+export const updateStockQuantity = async (itemName, quantity, unit = 'kg') => {
+  try {
+    const body = { quantity: Number(quantity) }
+    if (unit) body.unit = unit === 'unit' || unit === 'units' ? 'unit' : unit
+    const response = await api.put(`/logistics/stock/${encodeURIComponent(itemName)}`, body)
+    return response.data
+  } catch (error) {
+    console.error('Update stock quantity error:', error)
+    throw error
+  }
+}
+
+export const deleteStockItem = async (itemName) => {
+  try {
+    const response = await api.delete(`/logistics/stock/${encodeURIComponent(itemName)}`)
+    return response.data
+  } catch (error) {
+    console.error('Delete stock item error:', error)
+    throw error
+  }
+}
+
+export const saveBill = async (sessionId = 'default', isUnpaid = false, customerName = null, customerPhone = null) => {
   try {
     // Check if token exists
     const token = localStorage.getItem('authToken')
@@ -352,7 +520,11 @@ export const saveBill = async (sessionId = 'default') => {
     }
     
     // Use the axios instance which has the interceptor - it will add the token automatically
-    const response = await api.post('/bills/save', null, {
+    const response = await api.post('/bills/save', {
+      is_unpaid: isUnpaid,
+      customer_name: customerName,
+      customer_phone: customerPhone
+    }, {
       params: { session_id: sessionId }
     })
     return response.data
@@ -371,16 +543,42 @@ export const saveBill = async (sessionId = 'default') => {
 // Statistics API
 export const getStatistics = async (period = 'days') => {
   try {
-    const token = localStorage.getItem('authToken')
-    const response = await api.get('/statistics', {
-      params: { period },
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    })
+    const response = await api.get('/statistics', { params: { period } })
     return response.data
   } catch (error) {
     console.error('Get statistics error:', error)
+    throw error
+  }
+}
+
+// Analytics API (deeper insights)
+export const getAnalytics = async () => {
+  try {
+    const response = await api.get('/analytics')
+    return response.data
+  } catch (error) {
+    console.error('Get analytics error:', error)
+    throw error
+  }
+}
+
+// GST settings API
+export const getGstSettings = async () => {
+  try {
+    const response = await api.get('/gst/settings')
+    return response.data
+  } catch (error) {
+    console.error('Get GST settings error:', error)
+    throw error
+  }
+}
+
+export const updateGstRate = async (categoryKey, rate) => {
+  try {
+    const response = await api.put(`/gst/settings/${categoryKey}`, { rate })
+    return response.data
+  } catch (error) {
+    console.error('Update GST rate error:', error)
     throw error
   }
 }

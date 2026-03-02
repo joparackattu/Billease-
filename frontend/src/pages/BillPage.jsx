@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getBill, clearBill, saveBill, removeBillItem, updateBillItem, updateBillItemQuantity } from '../api/backend'
-import { DollarIcon, EditIcon, TrashIcon, SaveIcon, XIcon, ShoppingCartIcon, LoaderIcon, CheckIcon, PhoneIcon, PlusIcon, MinusIcon } from '../components/Icons'
+import { getBill, clearBill, saveBill, removeBillItem, updateBillItem, updateBillItemQuantity, getAllItems, addItemToBill } from '../api/backend'
+import { DollarIcon, EditIcon, TrashIcon, SaveIcon, XIcon, ShoppingCartIcon, LoaderIcon, CheckIcon, PhoneIcon, PlusIcon, MinusIcon, SearchIcon } from '../components/Icons'
 import './BillPage.css'
 
 function BillPage() {
@@ -13,10 +13,16 @@ function BillPage() {
   const [editWeight, setEditWeight] = useState('')
   const [showCheckoutModal, setShowCheckoutModal] = useState(false)
   const [customerPhone, setCustomerPhone] = useState('')
+  const [isUnpaid, setIsUnpaid] = useState(false)
+  const [customerName, setCustomerName] = useState('')
   const [shopkeeper, setShopkeeper] = useState(null)
   const [showEditModal, setShowEditModal] = useState(false)
   const [editingItemIndex, setEditingItemIndex] = useState(null)
   const [editingItemName, setEditingItemName] = useState('')
+  const [showAddItemModal, setShowAddItemModal] = useState(false)
+  const [availableItems, setAvailableItems] = useState([])
+  const [searchTerm, setSearchTerm] = useState('')
+  const [loadingItems, setLoadingItems] = useState(false)
 
   useEffect(() => {
     // Load bill on component mount
@@ -30,6 +36,32 @@ function BillPage() {
       } catch (e) {
         console.error('Error parsing shopkeeper data:', e)
       }
+    }
+
+    // Listen for items being added from scanning
+    const handleItemDetected = () => {
+      // Refresh bill when an item is detected and added
+      loadBill(false) // Don't show loading spinner
+    }
+    window.addEventListener('itemDetected', handleItemDetected)
+
+    // Debounced focus handler - only refresh if page was hidden for more than 5 seconds
+    let lastHiddenTime = 0
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        lastHiddenTime = Date.now()
+      } else {
+        // Only refresh if page was hidden for more than 5 seconds
+        if (Date.now() - lastHiddenTime > 5000) {
+          loadBill(false)
+        }
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      window.removeEventListener('itemDetected', handleItemDetected)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [])
 
@@ -71,12 +103,33 @@ function BillPage() {
     message += `*Items:*\n`
     
     billData.items.forEach((item, index) => {
-      const weightKg = (item.weight_grams / 1000).toFixed(3)
+      const pricingType = item.pricing_type || 'kg'
+      const quantity = item.quantity || 1
+      
       message += `${index + 1}. ${item.item_name.charAt(0).toUpperCase() + item.item_name.slice(1)}\n`
-      message += `   ${weightKg} kg × ₹${item.price_per_kg}/kg = ₹${item.total_price.toFixed(2)}\n\n`
+      
+      if (pricingType === 'units' || pricingType === 'piece') {
+        // Per unit/piece items
+        const unitLabel = quantity === 1 ? 'unit' : 'units'
+        message += `   ${quantity} ${unitLabel} × ₹${item.price_per_kg}/unit = ₹${item.total_price.toFixed(2)}\n\n`
+      } else if (pricingType === 'ltr') {
+        // Per litre items
+        const litres = (item.weight_grams / 1000).toFixed(3)
+        message += `   ${litres} litre${litres === '1.000' ? '' : 's'} × ₹${item.price_per_kg}/litre = ₹${item.total_price.toFixed(2)}\n\n`
+      } else {
+        // Per kg items (default)
+        const weightKg = (item.weight_grams / 1000).toFixed(3)
+        message += `   ${weightKg} kg × ₹${item.price_per_kg}/kg = ₹${item.total_price.toFixed(2)}\n\n`
+      }
     })
     
+    const subtotalWhatsApp = billData.items.reduce((s, i) => s + (i.total_price || 0), 0)
+    const gstWhatsApp = billData.items.reduce((s, i) => s + (i.gst_amount || 0), 0)
     message += `━━━━━━━━━━━━━━━\n`
+    message += `Subtotal: ₹${subtotalWhatsApp.toFixed(2)}\n`
+    if (gstWhatsApp > 0) {
+      message += `GST: ₹${gstWhatsApp.toFixed(2)}\n`
+    }
     message += `*Total: ₹${totalAmount.toFixed(2)}*\n\n`
     message += `Thank you for your purchase! `
     
@@ -155,9 +208,21 @@ function BillPage() {
       return
     }
 
+    // Validate unpaid requirements
+    if (isUnpaid) {
+      if (!customerName.trim()) {
+        alert('Please enter customer name for unpaid bills')
+        return
+      }
+      // Phone is optional - will be looked up from customer name if not provided
+    }
+
     try {
       setCheckingOut(true)
-      const result = await saveBill('default')
+      // Always pass customer info if provided (for both paid and unpaid bills)
+      const customerNameToPass = customerName.trim() || null
+      const customerPhoneToPass = customerPhone.trim() || null
+      const result = await saveBill('default', isUnpaid, customerNameToPass, customerPhoneToPass)
       
       const totalAmount = bill.items.reduce((sum, item) => sum + item.total_price, 0)
       const hasPhoneNumber = customerPhone.trim()
@@ -167,14 +232,15 @@ function BillPage() {
         const message = formatBillForWhatsApp(bill, result.bill_number, totalAmount)
         sendBillViaWhatsApp(customerPhone.trim(), message)
         
-        // On mobile, give WhatsApp time to open before showing alert
+        // On mobile, give WhatsApp time to open before navigating
         if (isMobileDevice()) {
-          // Wait a bit for WhatsApp to open, then show alert and navigate
+          // Wait a bit for WhatsApp to open, then navigate
           setTimeout(() => {
             setCheckingOut(false)
             setShowCheckoutModal(false)
             setCustomerPhone('')
-            alert(`✅ Bill saved successfully!\nBill Number: ${result.bill_number}\nTotal: ₹${result.total_amount.toFixed(2)}\n\nBill sent to customer via WhatsApp!`)
+            setIsUnpaid(false)
+            setCustomerName('')
             navigate('/history')
           }, 500)
           return // Exit early, navigation will happen in setTimeout
@@ -184,8 +250,13 @@ function BillPage() {
       setCheckingOut(false)
       setShowCheckoutModal(false)
       setCustomerPhone('')
+      setIsUnpaid(false)
+      setCustomerName('')
       
-      alert(`✅ Bill saved successfully!\nBill Number: ${result.bill_number}\nTotal: ₹${result.total_amount.toFixed(2)}${hasPhoneNumber ? '\n\nBill sent to customer via WhatsApp!' : ''}`)
+      // Clear customers cache so it refreshes when navigating to customers page
+      sessionStorage.removeItem('allCustomers')
+      sessionStorage.removeItem('allCustomersTime')
+      
       navigate('/history')
     } catch (error) {
       console.error('Save bill error:', error)
@@ -195,7 +266,12 @@ function BillPage() {
         navigate('/login')
       } else {
         const errorMsg = error.response?.data?.detail || error.message || 'Failed to save bill. Please try again.'
-        alert(`Failed to save bill: ${errorMsg}`)
+        // If customer not found, suggest adding phone number
+        if (errorMsg.includes('Customer not found') && isUnpaid) {
+          alert(`Customer not found. Please provide phone number for new customers.\n\nError: ${errorMsg}`)
+        } else {
+          alert(`Failed to save bill: ${errorMsg}`)
+        }
       }
     } finally {
       setCheckingOut(false)
@@ -291,6 +367,84 @@ function BillPage() {
     }
   }
 
+  const handleOpenAddItemModal = async () => {
+    setShowAddItemModal(true)
+    setSearchTerm('')
+    if (availableItems.length === 0) {
+      await loadAvailableItems()
+    }
+  }
+
+  const handleCloseAddItemModal = () => {
+    setShowAddItemModal(false)
+    setSearchTerm('')
+  }
+
+  const loadAvailableItems = async () => {
+    try {
+      setLoadingItems(true)
+      const data = await getAllItems()
+      setAvailableItems(data || [])
+    } catch (error) {
+      console.error('Error loading items:', error)
+      alert('Failed to load items. Please try again.')
+      setAvailableItems([])
+    } finally {
+      setLoadingItems(false)
+    }
+  }
+
+  const handleAddItemToBill = async (item) => {
+    try {
+      // Calculate default weight/quantity based on pricing type
+      let weightGrams = 1000 // Default 1 kg
+      
+      if (item.pricing_type === 'units') {
+        weightGrams = 1 // For units, we use quantity instead
+      } else if (item.pricing_type === 'ltr') {
+        weightGrams = 1000 // 1 litre = 1000 grams (assuming 1 litre = 1 kg)
+      }
+      // For 'kg', default is already 1000 grams (1 kg)
+
+      const itemToAdd = {
+        name: item.item_name,
+        weight_grams: weightGrams,
+        price_per_kg: parseFloat(item.selling_price || item.price_per_kg)
+      }
+
+      await addItemToBill(itemToAdd, 'default', item.pricing_type)
+      await loadBill(false)
+      handleCloseAddItemModal()
+    } catch (error) {
+      console.error('Error adding item to bill:', error)
+      alert('Failed to add item to bill. Please try again.')
+    }
+  }
+
+  const getPricingTypeLabel = (type) => {
+    switch(type) {
+      case 'kg': return 'per kg'
+      case 'ltr': return 'per litre'
+      case 'units': return 'per unit'
+      default: return 'per kg'
+    }
+  }
+
+  const getDefaultQuantity = (type) => {
+    switch(type) {
+      case 'kg': return '1 kg'
+      case 'ltr': return '1 litre'
+      case 'units': return '1 unit'
+      default: return '1 kg'
+    }
+  }
+
+  const filteredItems = searchTerm.trim() 
+    ? availableItems.filter(item =>
+        item.item_name.toLowerCase().startsWith(searchTerm.toLowerCase())
+      )
+    : []
+
   if (loading) {
     return (
       <div className="bill-page">
@@ -302,7 +456,9 @@ function BillPage() {
     )
   }
 
-  const total = bill?.items?.reduce((sum, item) => sum + item.total_price, 0) || 0
+  const subtotal = bill?.subtotal ?? (bill?.items?.reduce((sum, item) => sum + item.total_price, 0) || 0)
+  const gstTotal = bill?.gst_total ?? (bill?.items?.reduce((sum, item) => sum + (item.gst_amount || 0), 0) || 0)
+  const total = bill?.total ?? (subtotal + gstTotal)
 
   return (
     <div className="bill-page">
@@ -339,7 +495,12 @@ function BillPage() {
                     )}
                   </div>
                 </div>
-                <div className="item-price">₹{item.total_price.toFixed(2)}</div>
+                <div className="item-price">
+                  ₹{item.total_price.toFixed(2)}
+                  {(item.gst_rate || 0) > 0 && (
+                    <span className="item-gst-badge">{item.gst_rate}% GST</span>
+                  )}
+                </div>
                 {item.pricing_type === 'piece' && (
                   <div className="quantity-controls">
                     <button
@@ -378,6 +539,16 @@ function BillPage() {
               <span>Items</span>
               <span>{bill.items.length}</span>
             </div>
+            <div className="summary-row">
+              <span>Subtotal</span>
+              <span>₹{subtotal.toFixed(2)}</span>
+            </div>
+            {gstTotal > 0 && (
+              <div className="summary-row">
+                <span>GST</span>
+                <span>₹{gstTotal.toFixed(2)}</span>
+              </div>
+            )}
             <div className="summary-row total">
               <span>Total</span>
               <span>₹{total.toFixed(2)}</span>
@@ -385,6 +556,13 @@ function BillPage() {
           </div>
 
           <div className="bill-actions">
+            <button
+              onClick={handleOpenAddItemModal}
+              className="add-item-button"
+            >
+              <PlusIcon size={20} />
+              <span>Add Item</span>
+            </button>
             <button
               onClick={handleCheckoutClick}
               disabled={checkingOut}
@@ -419,11 +597,58 @@ function BillPage() {
                       <span>Items:</span>
                       <span>{bill.items.length}</span>
                     </div>
+                    <div className="summary-preview-row">
+                      <span>Subtotal:</span>
+                      <span>₹{subtotal.toFixed(2)}</span>
+                    </div>
+                    {gstTotal > 0 && (
+                      <div className="summary-preview-row">
+                        <span>GST:</span>
+                        <span>₹{gstTotal.toFixed(2)}</span>
+                      </div>
+                    )}
                     <div className="summary-preview-row total">
                       <span>Total:</span>
                       <span>₹{total.toFixed(2)}</span>
                     </div>
                   </div>
+
+                  <div className="unpaid-section">
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={isUnpaid}
+                        onChange={(e) => {
+                          setIsUnpaid(e.target.checked)
+                          if (!e.target.checked) {
+                            setCustomerName('')
+                          }
+                        }}
+                        className="unpaid-checkbox"
+                      />
+                      <span>Unpaid</span>
+                    </label>
+                  </div>
+
+                  {isUnpaid && (
+                    <div className="customer-name-section">
+                      <label htmlFor="customer-name">
+                        Customer Name *
+                      </label>
+                      <input
+                        id="customer-name"
+                        type="text"
+                        placeholder="Enter customer name"
+                        value={customerName}
+                        onChange={(e) => setCustomerName(e.target.value)}
+                        className="customer-name-input"
+                        required
+                      />
+                      <p className="customer-name-hint">
+                        Phone number will be retrieved from customer records if not provided
+                      </p>
+                    </div>
+                  )}
 
                   <div className="phone-input-section">
                     <label htmlFor="customer-phone">
@@ -439,7 +664,9 @@ function BillPage() {
                       className="phone-input"
                     />
                     <p className="phone-hint">
-                      If provided, the bill will be sent to this number via WhatsApp
+                      {isUnpaid 
+                        ? 'If not provided, phone will be retrieved from customer records by name'
+                        : 'If provided, the bill will be sent to this number via WhatsApp'}
                     </p>
                   </div>
                 </div>
@@ -477,13 +704,83 @@ function BillPage() {
         <div className="empty-bill">
           <ShoppingCartIcon size={64} className="empty-icon" />
           <h3>No items in bill</h3>
-          <p className="empty-hint">Scan items to add them to the bill</p>
-          <button
-            onClick={() => navigate('/scan')}
-            className="scan-button"
-          >
-            Go to Scan
-          </button>
+          <p className="empty-hint">Add items manually or scan items to add them to the bill</p>
+          <div className="empty-bill-actions">
+            <button
+              onClick={handleOpenAddItemModal}
+              className="add-item-button"
+            >
+              <PlusIcon size={20} />
+              <span>Add Item</span>
+            </button>
+            <button
+              onClick={() => navigate('/scan')}
+              className="scan-button"
+            >
+              Go to Scan
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Add Item Modal */}
+      {showAddItemModal && (
+        <div className="modal-overlay add-item-modal-overlay" onClick={handleCloseAddItemModal}>
+          <div className="add-item-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Add Item to Bill</h2>
+              <button className="modal-close" onClick={handleCloseAddItemModal}>
+                <XIcon size={20} />
+              </button>
+            </div>
+            <div className="modal-content">
+              <div className="add-item-search-section">
+                <div className="search-bar">
+                  <SearchIcon size={20} className="search-icon" />
+                  <input
+                    type="text"
+                    placeholder="Search items..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="search-input"
+                    autoFocus
+                  />
+                </div>
+              </div>
+              {loadingItems ? (
+                <div className="loading-state">
+                  <LoaderIcon size={24} className="spinner" />
+                  <p>Loading items...</p>
+                </div>
+              ) : filteredItems.length === 0 ? (
+                <div className="empty-state">
+                  <p>{searchTerm.trim() ? 'No items found matching your search' : 'Start typing to search for items...'}</p>
+                </div>
+              ) : (
+                <div className="items-list">
+                  {filteredItems.map((item) => (
+                    <div
+                      key={item.item_name}
+                      className="item-option-card"
+                      onClick={() => handleAddItemToBill(item)}
+                    >
+                      <div className="item-option-info">
+                        <div className="item-option-name">{item.item_name}</div>
+                        <div className="item-option-details">
+                          <span className="item-option-price">₹{parseFloat(item.selling_price || item.price_per_kg).toFixed(2)}</span>
+                          <span className="item-option-type">{getPricingTypeLabel(item.pricing_type)}</span>
+                        </div>
+                      </div>
+                      <div className="item-option-action">
+                        <span className="item-option-quantity">{getDefaultQuantity(item.pricing_type)}</span>
+                        <PlusIcon size={20} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

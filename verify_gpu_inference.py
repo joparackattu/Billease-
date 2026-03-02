@@ -137,3 +137,7 @@ print("   4. Check nvidia-smi for GPU utilization")
 
 
 
+
+
+
+

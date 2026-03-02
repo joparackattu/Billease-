@@ -1,32 +1,75 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
+import { useLocation } from 'react-router-dom'
 import { getBillHistory } from '../api/backend'
 import { DocumentIcon, XIcon, LoaderIcon } from '../components/Icons'
 import './HistoryPage.css'
 
 function HistoryPage() {
+  const location = useLocation()
   const [history, setHistory] = useState([])
   const [selectedBill, setSelectedBill] = useState(null)
   const [loading, setLoading] = useState(true)
+  const lastPathRef = useRef(null)
 
   useEffect(() => {
-    loadHistory()
-  }, [])
+    // Load from cache first
+    const cachedData = sessionStorage.getItem('billHistory')
+    const cacheTime = sessionStorage.getItem('billHistoryTime')
+    const now = Date.now()
+    const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
+    
+    if (cachedData && cacheTime && (now - parseInt(cacheTime)) < CACHE_DURATION) {
+      try {
+        setHistory(JSON.parse(cachedData))
+        setLoading(false)
+        // Load fresh data in background
+        loadHistory(true)
+        return
+      } catch (e) {
+        console.error('Error parsing cached history:', e)
+      }
+    }
+    
+    // Only load if this is a new navigation to this page
+    if (lastPathRef.current !== location.pathname) {
+      lastPathRef.current = location.pathname
+      loadHistory(false)
+    }
+  }, [location.pathname])
 
-  const loadHistory = async () => {
+  const loadHistory = async (background = false) => {
     try {
-      setLoading(true)
+      if (!background) {
+        setLoading(true)
+      }
       const data = await getBillHistory()
-      setHistory(data.bills || [])
+      const bills = data.bills || []
+      setHistory(bills)
+      // Cache the data
+      sessionStorage.setItem('billHistory', JSON.stringify(bills))
+      sessionStorage.setItem('billHistoryTime', Date.now().toString())
     } catch (error) {
       console.error('Error loading history:', error)
+      // If offline, try to use cached data
+      const cachedData = sessionStorage.getItem('billHistory')
+      if (cachedData && !navigator.onLine) {
+        try {
+          setHistory(JSON.parse(cachedData))
+          return
+        } catch (e) {
+          console.error('Error parsing cached history:', e)
+        }
+      }
       if (error.response?.status === 401) {
         alert('Please login to view bill history.')
         window.location.href = '/login'
-      } else {
+      } else if (!background) {
         alert('Failed to load bill history.')
       }
     } finally {
-      setLoading(false)
+      if (!background) {
+        setLoading(false)
+      }
     }
   }
 
@@ -108,6 +151,8 @@ function HistoryPage() {
                     const pricingType = item.pricing_type || 'weight'
                     const quantity = item.quantity || 1
                     const isPerPiece = pricingType === 'piece'
+                    const gstRate = item.gst_rate || 0
+                    const gstAmount = item.gst_amount || 0
                     
                     return (
                       <div key={index} className="bill-detail-item">
@@ -123,6 +168,9 @@ function HistoryPage() {
                                 {item.weight_grams}g @ ₹{item.price_per_kg}/kg
                               </>
                             )}
+                            {gstRate > 0 && (
+                              <span className="detail-item-gst"> ({gstRate}% GST: ₹{gstAmount.toFixed(2)})</span>
+                            )}
                           </div>
                         </div>
                         <div className="detail-item-price">
@@ -132,10 +180,28 @@ function HistoryPage() {
                     )
                   })}
                 </div>
-                <div className="bill-detail-total">
-                  <span>Total</span>
-                  <span>₹{selectedBill.total_amount.toFixed(2)}</span>
-                </div>
+                {(() => {
+                  const detailSubtotal = selectedBill.items.reduce((s, i) => s + (i.total_price || 0), 0)
+                  const detailGst = selectedBill.items.reduce((s, i) => s + (i.gst_amount || 0), 0)
+                  return (
+                    <>
+                      <div className="bill-detail-subtotal">
+                        <span>Subtotal</span>
+                        <span>₹{detailSubtotal.toFixed(2)}</span>
+                      </div>
+                      {detailGst > 0 && (
+                        <div className="bill-detail-gst">
+                          <span>GST</span>
+                          <span>₹{detailGst.toFixed(2)}</span>
+                        </div>
+                      )}
+                      <div className="bill-detail-total">
+                        <span>Total</span>
+                        <span>₹{selectedBill.total_amount.toFixed(2)}</span>
+                      </div>
+                    </>
+                  )
+                })()}
               </div>
             </div>
           )}

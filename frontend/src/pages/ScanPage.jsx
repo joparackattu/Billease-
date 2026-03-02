@@ -6,6 +6,7 @@ import './ScanPage.css'
 
 function ScanPage() {
   const [cameraUrl, setCameraUrl] = useState('')
+  const [cameraError, setCameraError] = useState(false)
   const [isScanning, setIsScanning] = useState(false)
   const [detectedItems, setDetectedItems] = useState([])
   const [error, setError] = useState('')
@@ -54,14 +55,14 @@ function ScanPage() {
     }
   }, [])
 
-  // Refresh camera feed
+  // Refresh camera feed (every 500ms so the image has time to load before next request)
   useEffect(() => {
     const refreshCamera = () => {
       setCameraUrl(getCameraFrame())
     }
     
     refreshCamera()
-    cameraRefreshInterval.current = setInterval(refreshCamera, 120)
+    cameraRefreshInterval.current = setInterval(refreshCamera, 500)
     
     return () => {
       if (cameraRefreshInterval.current) {
@@ -99,20 +100,21 @@ function ScanPage() {
 
       <div className="camera-container">
         <div className="camera-feed">
-          {cameraUrl ? (
+          {cameraUrl && !cameraError ? (
             <img 
               src={cameraUrl} 
               alt="Camera Feed" 
               className="camera-image"
-              onError={(e) => {
-                console.error('Camera feed error')
-                e.target.style.display = 'none'
-              }}
+              onLoad={() => setCameraError(false)}
+              onError={() => setCameraError(true)}
             />
           ) : (
             <div className="camera-placeholder">
               <CameraIcon size={48} className="placeholder-icon" />
-              <p>Loading camera...</p>
+              <p>{cameraUrl && cameraError ? 'Camera offline or unreachable' : 'Loading camera...'}</p>
+              {cameraError && (
+                <p className="camera-placeholder-hint">Check that the camera is on and RTSP is enabled in the Tapo app.</p>
+              )}
             </div>
           )}
         </div>
