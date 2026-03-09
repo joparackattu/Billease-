@@ -16,9 +16,12 @@ class ScanItemRequest(BaseModel):
     This is what the ESP32 will send to the backend:
     - image: Optional base64 encoded image (if not provided, backend captures from RTSP)
     - weight_grams: Weight of the item in grams
+    - item_name: Optional. If the model does not recognize the item (unknown), this name is used for billing.
+      Use this to "tell" the system what is on the platform when detection fails.
     """
     image: Optional[str] = Field(None, description="Optional: Base64 encoded image. If not provided, backend captures from RTSP camera")
     weight_grams: float = Field(..., gt=0, description="Weight of the item in grams (must be > 0)")
+    item_name: Optional[str] = Field(None, description="Optional: Use this item name when detection returns unknown (e.g. to teach / override)")
 
 
 class ItemInfo(BaseModel):

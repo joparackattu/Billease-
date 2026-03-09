@@ -19,14 +19,19 @@ class ScanningService {
     this.listeners = new Set() // For notifying components about state changes
     this.stableDetectionCount = 0 // Track stable detections
     this.lastDetectedItem = null
-    
-    // Performance tracking
+    this.overrideItemName = '' // When set, used when model returns "unknown"
     this.scanCount = 0
     this.lastFpsUpdate = Date.now()
     this.currentFps = 0
-    
-    // Start service if scanning was active
     this.initialize()
+  }
+
+  setOverrideItemName(name) {
+    this.overrideItemName = name ? String(name).trim() : ''
+  }
+
+  getOverrideItemName() {
+    return this.overrideItemName || ''
   }
 
   /**
@@ -152,9 +157,8 @@ class ScanningService {
       // In production, this will come from ESP32
       const randomWeight = Math.floor(Math.random() * 400) + 100
       
-      // Automatically add to bill when detected
-      // This is the only async operation - runs as fast as backend allows
-      const result = await scanItem(randomWeight, null, 'default', true)
+      const itemNameOverride = this.getOverrideItemName()
+      const result = await scanItem(randomWeight, null, 'default', true, itemNameOverride)
       
       // Track performance (FPS)
       this.scanCount++

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { getCameraFrame, resetDetectionState } from '../api/backend'
+import { getCameraFrame, resetDetectionState, teachItem } from '../api/backend'
 import scanningService from '../services/scanningService'
 import { CameraIcon, PlayIcon, StopIcon, CheckIcon, AlertCircleIcon } from '../components/Icons'
 import './ScanPage.css'
@@ -10,6 +10,10 @@ function ScanPage() {
   const [isScanning, setIsScanning] = useState(false)
   const [detectedItems, setDetectedItems] = useState([])
   const [error, setError] = useState('')
+  const [itemNameOverride, setItemNameOverride] = useState('')
+  const [teachingItemName, setTeachingItemName] = useState(null) // when set, we're in "capture more" mode
+  const [teachingCaptureCount, setTeachingCaptureCount] = useState(0)
+  const [capturing, setCapturing] = useState(false)
   const cameraRefreshInterval = useRef(null)
 
   // Initialize scanning state from service (persists across navigation)
@@ -71,6 +75,10 @@ function ScanPage() {
     }
   }, [])
 
+  useEffect(() => {
+    scanningService.setOverrideItemName(itemNameOverride)
+  }, [itemNameOverride])
+
   const handleToggleScan = async () => {
     if (!isScanning) {
       setDetectedItems([])
@@ -120,6 +128,18 @@ function ScanPage() {
         </div>
       </div>
 
+      <div className="scan-item-name-row">
+        <label className="scan-item-name-label">Item name (if not detected)</label>
+        <input
+          type="text"
+          className="scan-item-name-input"
+          placeholder="e.g. potato, chips..."
+          value={itemNameOverride}
+          onChange={(e) => setItemNameOverride(e.target.value)}
+        />
+        <p className="scan-item-name-hint">When the model doesn’t recognize the item, this name is used for the bill.</p>
+      </div>
+
       <button
         onClick={handleToggleScan}
         className={`scan-button ${isScanning ? 'scanning' : ''}`}
@@ -136,6 +156,68 @@ function ScanPage() {
           </>
         )}
       </button>
+
+      <button
+        type="button"
+        className="teach-item-button"
+        disabled={!!teachingItemName || capturing}
+        onClick={async () => {
+          const name = window.prompt('Enter the item name (e.g. green peas):')
+          if (!name || !name.trim()) return
+          try {
+            setCapturing(true)
+            await teachItem(null, name.trim())
+            setTeachingItemName(name.trim())
+            setTeachingCaptureCount(1)
+          } catch (err) {
+            alert(err.response?.data?.detail || err.message || 'Failed to save image')
+          } finally {
+            setCapturing(false)
+          }
+        }}
+      >
+        {capturing ? 'Saving...' : 'Teach system this item'}
+      </button>
+
+      {teachingItemName && (
+        <div className="teaching-panel">
+          <h3 className="teaching-panel-title">Teaching: {teachingItemName}</h3>
+          <p className="teaching-panel-message">
+            Change the item position and click <strong>Capture</strong> to add another image. Aim for 20–50+ images.
+          </p>
+          <p className="teaching-panel-count">{teachingCaptureCount} image{teachingCaptureCount !== 1 ? 's' : ''} saved</p>
+          <div className="teaching-panel-actions">
+            <button
+              type="button"
+              className="teaching-capture-button"
+              disabled={capturing}
+              onClick={async () => {
+                try {
+                  setCapturing(true)
+                  await teachItem(null, teachingItemName)
+                  setTeachingCaptureCount((c) => c + 1)
+                } catch (err) {
+                  alert(err.response?.data?.detail || err.message || 'Failed to save image')
+                } finally {
+                  setCapturing(false)
+                }
+              }}
+            >
+              {capturing ? 'Saving...' : 'Capture'}
+            </button>
+            <button
+              type="button"
+              className="teaching-done-button"
+              onClick={() => {
+                setTeachingItemName(null)
+                setTeachingCaptureCount(0)
+              }}
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
 
       {isScanning && (
         <div className="scanning-status">

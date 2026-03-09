@@ -26,6 +26,7 @@ import sqlite3
 from io import BytesIO
 from typing import Optional, List
 from datetime import datetime
+from pathlib import Path
 from app.models.schemas import (
     ScanItemRequest, ScanItemResponse, BillItem,
     LoginRequest, LoginResponse, RegisterRequest, UpdateProfileRequest,
@@ -761,7 +762,8 @@ async def add_or_update_stock(
     session: dict = Depends(require_auth)
 ):
     """
-    Add a new stock item or set quantity for existing item (per shopkeeper).
+    Add quantity to stock. If item exists, adds to current quantity.
+    If item is new, creates it with the given quantity.
     Body: { "item_name": "...", "quantity": number, "unit": "kg" | "unit" | "ltr" }
     """
     shopkeeper_id = session["shopkeeper_id"]
@@ -777,7 +779,10 @@ async def add_or_update_stock(
     if quantity < 0:
         raise HTTPException(status_code=400, detail="Quantity cannot be negative")
     try:
-        row = db.add_or_update_stock(shopkeeper_id, item_name, quantity, unit=unit)
+        # Add to existing stock if item exists, else create new
+        row = db.adjust_stock_quantity(shopkeeper_id, item_name, quantity)
+        if row is None:
+            row = db.add_or_update_stock(shopkeeper_id, item_name, quantity, unit=unit)
         return {"message": "Stock updated successfully", "stock": row}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -869,11 +874,21 @@ async def get_analytics(session: dict = Depends(require_auth)):
 async def get_gst_settings(session: dict = Depends(require_auth)):
     """
     Get GST category settings for the current shopkeeper.
-    Ensures default categories exist if none are configured yet.
+    Rates are fixed by government slabs (read-only).
     """
     shopkeeper_id = session["shopkeeper_id"]
     settings = db.get_gst_settings(shopkeeper_id)
     return {"categories": settings}
+
+
+@app.get("/gst/analytics", response_model=dict)
+async def get_gst_analytics(session: dict = Depends(require_auth)):
+    """
+    Get GST analytics: total GST collected, this month, last month, today.
+    Helps shopkeeper understand how much GST is paid to the government.
+    """
+    shopkeeper_id = session["shopkeeper_id"]
+    return db.get_gst_analytics(shopkeeper_id)
 
 
 @app.put("/gst/settings/{category_key}", response_model=dict)
@@ -2547,6 +2562,55 @@ async def dataset_statistics():
         }
 
 
+@app.post("/teach-item", response_model=dict)
+async def teach_item(
+    request: dict = Body(...),
+    session: dict = Depends(require_auth)
+):
+    """
+    Save an image with an item name for later model training.
+    Place the item on the platform, then call with item_name.
+    If image (base64) is not provided, the current camera frame is captured and saved.
+    Images are stored under datasets/taught/<item_name>/.
+    Collect many images (e.g. 20–50+ per item) then run YOLO training to teach the model.
+    """
+    import re
+    image_b64 = request.get("image")
+    item_name = (request.get("item_name") or "").strip()
+    if not item_name:
+        raise HTTPException(status_code=400, detail="item_name is required")
+    if image_b64:
+        try:
+            image_bytes = base64.b64decode(image_b64)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid base64 image: {e}")
+    else:
+        loop = asyncio.get_event_loop()
+        image_b64 = await loop.run_in_executor(
+            None,
+            camera_service.capture_frame,
+            0,
+            True,
+            640,
+        )
+        if not image_b64:
+            raise HTTPException(status_code=503, detail="Could not capture camera frame. Is the camera on?")
+        image_bytes = base64.b64decode(image_b64)
+    safe_name = re.sub(r"[^\w\-]", "_", item_name).strip("_") or "item"
+    taught_dir = Path("datasets") / "taught" / safe_name
+    taught_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = taught_dir / f"IMG_{ts}.jpg"
+    path.write_bytes(image_bytes)
+    logger.info(f"Taught image saved: {path} for item '{item_name}'")
+    return {
+        "message": "Image saved for training",
+        "item_name": item_name,
+        "path": str(path),
+        "hint": "Collect 20–50+ images per item, then run YOLO training to add this class to the model.",
+    }
+
+
 @app.post("/scan-item", response_model=ScanItemResponse)
 async def scan_item(
     request: ScanItemRequest,
@@ -2643,15 +2707,20 @@ async def scan_item(
         
         print(f"📊 YOLO Result: item='{detected_item_name}', confidence={detection_confidence:.3f}")
         
-        # Step 4: Reject "unknown" items - never add to bill
-        if detected_item_name.lower() == "unknown":
+        # Step 4: If unknown but user provided item_name, use it (teach / override for this scan)
+        user_item_name = (getattr(request, "item_name", None) or "").strip()
+        if detected_item_name.lower() == "unknown" and user_item_name:
+            detected_item_name = user_item_name.lower()
+            detection_confidence = 0.9  # Treat as confident so billing continues
+            logger.info(f"✅ Using user-provided item name: '{detected_item_name}' (model did not recognize)")
+            print(f"✅ Using user-provided item name: '{detected_item_name}'")
+        elif detected_item_name.lower() == "unknown":
             logger.info(f"🚫 [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Unknown item detected - not adding to bill")
             print(f"🚫 Unknown item detected - not adding to bill")
             bill_session = bill_manager.get_session(session_id)
-            # Still process through state machine to update state, but don't bill
             detection_state.process_detection(detected_item_name, request.weight_grams, detection_confidence)
             return ScanItemResponse(
-                detected_item=None,  # No new detection to add to bill
+                detected_item=None,
                 current_bill=bill_session.items,
                 bill_total=round(bill_session.get_total(), 2)
             )

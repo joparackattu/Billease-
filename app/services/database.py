@@ -2101,6 +2101,72 @@ class Database:
         conn.close()
         return float(row["rate"]) if row else 0.0
 
+    def get_gst_analytics(self, shopkeeper_id: int) -> Dict:
+        """
+        Compute GST analytics: total GST collected from bills,
+        this month, last month, and today.
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT total_amount, items_json, created_at
+            FROM bills
+            WHERE shopkeeper_id = ?
+            ORDER BY created_at DESC
+        """, (shopkeeper_id,))
+        rows = cursor.fetchall()
+        conn.close()
+
+        today = datetime.now().date()
+        this_month_start = today.replace(day=1)
+        if this_month_start.month == 1:
+            last_month_start = this_month_start.replace(year=today.year - 1, month=12)
+        else:
+            last_month_start = this_month_start.replace(month=this_month_start.month - 1)
+        from calendar import monthrange
+        _, last_month_days = monthrange(last_month_start.year, last_month_start.month)
+        last_month_end = last_month_start.replace(day=last_month_days)
+
+        total_gst = 0.0
+        this_month_gst = 0.0
+        last_month_gst = 0.0
+        today_gst = 0.0
+
+        for row in rows:
+            items_json = row["items_json"]
+            created_at = row["created_at"]
+            try:
+                if "T" in created_at:
+                    date_obj = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                else:
+                    date_obj = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S")
+            except Exception:
+                continue
+            d = date_obj.date()
+
+            bill_gst = 0.0
+            try:
+                items = json.loads(items_json)
+                for item in items:
+                    bill_gst += float(item.get("gst_amount") or 0)
+            except Exception:
+                pass
+
+            total_gst += bill_gst
+            if d >= this_month_start:
+                this_month_gst += bill_gst
+            elif last_month_start <= d <= last_month_end:
+                last_month_gst += bill_gst
+            if d == today:
+                today_gst += bill_gst
+
+        return {
+            "total_gst_collected": round(total_gst, 2),
+            "this_month_gst": round(this_month_gst, 2),
+            "last_month_gst": round(last_month_gst, 2),
+            "today_gst": round(today_gst, 2),
+        }
+
     def _migrate_bills_to_new_format(self):
         """
         Migrate old bills to include pricing_type and quantity fields.

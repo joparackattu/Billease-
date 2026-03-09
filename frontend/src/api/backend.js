@@ -41,21 +41,34 @@ api.interceptors.response.use(
 )
 
 // API functions
-export const scanItem = async (weightGrams, imageBase64 = null, sessionId = 'default', addToBill = false) => {
+export const scanItem = async (weightGrams, imageBase64 = null, sessionId = 'default', addToBill = false, itemNameOverride = null) => {
   try {
-    // Token will be added automatically by interceptor
-    const response = await api.post('/scan-item', {
+    const body = {
       weight_grams: weightGrams,
-      image: imageBase64, // Optional - backend will capture from camera if not provided
-    }, {
-      params: { 
-        session_id: sessionId,
-        add_to_bill: addToBill
-      }
+      image: imageBase64,
+    }
+    if (itemNameOverride && String(itemNameOverride).trim()) {
+      body.item_name = String(itemNameOverride).trim()
+    }
+    const response = await api.post('/scan-item', body, {
+      params: { session_id: sessionId, add_to_bill: addToBill }
     })
     return response.data
   } catch (error) {
     console.error('Scan error:', error)
+    throw error
+  }
+}
+
+export const teachItem = async (imageBase64, itemName) => {
+  try {
+    const response = await api.post('/teach-item', {
+      image: imageBase64,
+      item_name: itemName?.trim() || '',
+    })
+    return response.data
+  } catch (error) {
+    console.error('Teach item error:', error)
     throw error
   }
 }
@@ -569,6 +582,16 @@ export const getGstSettings = async () => {
     return response.data
   } catch (error) {
     console.error('Get GST settings error:', error)
+    throw error
+  }
+}
+
+export const getGstAnalytics = async () => {
+  try {
+    const response = await api.get('/gst/analytics')
+    return response.data
+  } catch (error) {
+    console.error('Get GST analytics error:', error)
     throw error
   }
 }

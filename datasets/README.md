@@ -125,6 +125,23 @@ You can add more classes in `data.yaml` after training.
 - **Balance classes:** Try to have similar number of images per class
 - **Test images:** Keep some images separate for final testing (not in train/val)
 
+## 🧠 Teaching the system a new item
+
+You can collect images for a new item from the **Scan** page:
+
+1. Place the item on the platform.
+2. Click **“Teach system this item”** and enter the item name (e.g. `potato`).
+3. The current camera frame is saved under `datasets/taught/<item_name>/`.
+4. Repeat with the item in different positions/angles. Collect **20–50+ images** per item.
+
+Then:
+
+- Add labels (e.g. with LabelImg) for the images in `datasets/taught/<item_name>/`, or use a script to generate full-image bounding boxes.
+- Create or update a YOLO dataset that includes this class and train/fine-tune (e.g. `yolo detect train data=... model=yolov8n.pt`).
+- Export the new model as `models/item_detection.pt` (or merge with existing custom model) so the scanner can recognize the new item.
+
+Until the model is retrained, use **“Item name (if not detected)”** on the Scan page: type the item name there and start scanning; when the model returns “unknown”, that name is used for the bill.
+
 ## 📚 Resources
 
 - [YOLOv8 Documentation](https://docs.ultralytics.com/)

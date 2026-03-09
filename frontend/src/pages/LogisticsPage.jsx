@@ -230,7 +230,7 @@ function LogisticsPage() {
                   )}
                 </div>
                 <div className="form-group form-group-qty">
-                  <label>Quantity *</label>
+                  <label>Quantity to add *</label>
                   <input
                     type="number"
                     min="0"
@@ -240,6 +240,7 @@ function LogisticsPage() {
                     placeholder="0"
                     required
                   />
+                  <span className="form-hint">Added to existing stock if item already exists</span>
                 </div>
                 <div className="form-group form-group-unit">
                   <label>Unit</label>

@@ -1,53 +1,33 @@
 import React, { useState, useEffect } from 'react'
-import { getGstSettings, updateGstRate } from '../api/backend'
+import { getGstSettings, getGstAnalytics } from '../api/backend'
+import { LoaderIcon } from '../components/Icons'
 import './GSTPage.css'
 
 function GSTPage() {
   const [categories, setCategories] = useState([])
+  const [analytics, setAnalytics] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [savingKey, setSavingKey] = useState(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    loadSettings()
+    loadData()
   }, [])
 
-  const loadSettings = async () => {
+  const loadData = async () => {
     try {
       setLoading(true)
       setError('')
-      const res = await getGstSettings()
-      setCategories(res.categories || [])
+      const [settingsRes, analyticsRes] = await Promise.all([
+        getGstSettings(),
+        getGstAnalytics(),
+      ])
+      setCategories(settingsRes.categories || [])
+      setAnalytics(analyticsRes)
     } catch (err) {
-      console.error('Failed to load GST settings:', err)
-      setError(err.response?.data?.detail || 'Failed to load GST settings')
+      console.error('Failed to load GST data:', err)
+      setError(err.response?.data?.detail || 'Failed to load GST data')
     } finally {
       setLoading(false)
-    }
-  }
-
-  const handleRateChange = (key, value) => {
-    setCategories((prev) =>
-      prev.map((c) =>
-        c.category_key === key ? { ...c, rate: value } : c
-      )
-    )
-  }
-
-  const handleSave = async (key, rate) => {
-    if (isNaN(parseFloat(rate))) {
-      alert('Please enter a valid GST rate')
-      return
-    }
-    try {
-      setSavingKey(key)
-      await updateGstRate(key, parseFloat(rate))
-      await loadSettings()
-    } catch (err) {
-      console.error('Failed to update GST rate:', err)
-      alert(err.response?.data?.detail || 'Failed to update GST rate')
-    } finally {
-      setSavingKey(null)
     }
   }
 
@@ -55,59 +35,75 @@ function GSTPage() {
     <div className="gst-page">
       <div className="page-header">
         <span className="page-header-icon">₹</span>
-        <h1>GST Settings</h1>
+        <h1>GST</h1>
       </div>
       <p className="page-description">
-        Set GST % for item categories. These defaults are used to estimate GST on the bill.
+        Government-fixed GST slabs by category. Rates cannot be changed.
       </p>
 
       {loading ? (
         <div className="loading-state">
-          <p>Loading GST settings...</p>
+          <LoaderIcon size={32} className="spinner" />
+          <p>Loading GST...</p>
         </div>
       ) : error ? (
         <div className="gst-error">{error}</div>
       ) : (
         <div className="gst-content">
-          <table className="gst-table">
-            <thead>
-              <tr>
-                <th>Category</th>
-                <th className="num">GST %</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {categories.map((cat) => (
-                <tr key={cat.category_key}>
-                  <td>{cat.display_name}</td>
-                  <td className="num">
-                    <input
-                      type="number"
-                      min="0"
-                      max="28"
-                      step="0.1"
-                      value={cat.rate}
-                      onChange={(e) =>
-                        handleRateChange(cat.category_key, e.target.value)
-                      }
-                      className="gst-input"
-                    />
-                  </td>
-                  <td>
-                    <button
-                      type="button"
-                      className="gst-save-button"
-                      disabled={savingKey === cat.category_key}
-                      onClick={() => handleSave(cat.category_key, cat.rate)}
-                    >
-                      {savingKey === cat.category_key ? 'Saving...' : 'Save'}
-                    </button>
-                  </td>
+          {/* GST Analytics - how much collected for government */}
+          <div className="gst-analytics-section">
+            <h3 className="gst-section-title">GST collected (to be paid to government)</h3>
+            <p className="gst-analytics-hint">
+              This is the GST collected from your sales. You need to pay this to the government as per GST filing.
+            </p>
+            <div className="gst-analytics-cards">
+              <div className="gst-analytics-card">
+                <div className="gst-card-label">Total GST collected</div>
+                <div className="gst-card-value">
+                  ₹{Number(analytics?.total_gst_collected || 0).toLocaleString('en-IN')}
+                </div>
+              </div>
+              <div className="gst-analytics-card">
+                <div className="gst-card-label">This month</div>
+                <div className="gst-card-value">
+                  ₹{Number(analytics?.this_month_gst || 0).toLocaleString('en-IN')}
+                </div>
+              </div>
+              <div className="gst-analytics-card">
+                <div className="gst-card-label">Last month</div>
+                <div className="gst-card-value">
+                  ₹{Number(analytics?.last_month_gst || 0).toLocaleString('en-IN')}
+                </div>
+              </div>
+              <div className="gst-analytics-card">
+                <div className="gst-card-label">Today</div>
+                <div className="gst-card-value">
+                  ₹{Number(analytics?.today_gst || 0).toLocaleString('en-IN')}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Fixed GST rates by category */}
+          <div className="gst-rates-section">
+            <h3 className="gst-section-title">GST slabs by category</h3>
+            <table className="gst-table">
+              <thead>
+                <tr>
+                  <th>Category</th>
+                  <th className="num">GST %</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {categories.map((cat) => (
+                  <tr key={cat.category_key}>
+                    <td>{cat.display_name}</td>
+                    <td className="num gst-rate-fixed">{cat.rate}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
           <div className="gst-info">
             <h3>GST slabs reference</h3>
@@ -125,4 +121,3 @@ function GSTPage() {
 }
 
 export default GSTPage
-

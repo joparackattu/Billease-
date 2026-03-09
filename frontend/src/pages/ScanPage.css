@@ -78,6 +78,135 @@
   text-align: center;
 }
 
+.scan-item-name-row {
+  margin-bottom: var(--spacing-md);
+}
+
+.scan-item-name-label {
+  display: block;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: var(--spacing-xs);
+}
+
+.scan-item-name-input {
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-base);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.scan-item-name-input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+}
+
+.scan-item-name-hint {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  margin: var(--spacing-xs) 0 0;
+}
+
+.teach-item-button {
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+  background: transparent;
+  color: var(--primary-color);
+  border: 1px solid var(--primary-color);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.teach-item-button:hover:not(:disabled) {
+  background: var(--primary-color);
+  color: white;
+}
+
+.teach-item-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.teaching-panel {
+  margin-top: var(--spacing-lg);
+  padding: var(--spacing-lg);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.teaching-panel-title {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 var(--spacing-sm);
+}
+
+.teaching-panel-message {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  margin: 0 0 var(--spacing-xs);
+}
+
+.teaching-panel-count {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--primary-color);
+  margin: 0 0 var(--spacing-md);
+}
+
+.teaching-panel-actions {
+  display: flex;
+  gap: var(--spacing-md);
+  flex-wrap: wrap;
+}
+
+.teaching-capture-button {
+  flex: 1;
+  min-width: 120px;
+  padding: var(--spacing-md);
+  background: var(--primary-color);
+  color: white;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.teaching-capture-button:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.teaching-capture-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.teaching-done-button {
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-base);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.teaching-done-button:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
 /* Scan Button */
 .scan-button {
   width: 100%;
